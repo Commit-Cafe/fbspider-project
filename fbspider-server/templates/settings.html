@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}设置{% endblock %}
+{% block content %}
+<h5 class="mb-3"><i class="fas fa-cog me-2"></i>设置 / 状态</h5>
+
+<div class="row g-3">
+    <!-- Connection Status -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><strong>插件连接状态</strong></div>
+            <div class="card-body" id="connStatus">
+                <div class="text-center text-muted py-3">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Token Info -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between">
+                <strong>Token 信息</strong>
+                <button class="btn btn-outline-primary btn-sm" onclick="sendCommand('refresh_token')">
+                    <i class="fas fa-key me-1"></i>刷新Token
+                </button>
+            </div>
+            <div class="card-body" id="tokenInfo">
+                <div class="text-center text-muted py-3">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DB Stats -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><strong>数据库统计</strong></div>
+            <div class="card-body" id="dbStats">
+                <div class="text-center text-muted py-3">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Password -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><strong>修改密码</strong></div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">当前密码</label>
+                    <input type="password" class="form-control" id="currentPassword">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">新密码</label>
+                    <input type="password" class="form-control" id="newPassword">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">确认新密码</label>
+                    <input type="password" class="form-control" id="confirmPassword">
+                </div>
+                <button class="btn btn-primary" onclick="changePassword()">
+                    <i class="fas fa-lock me-1"></i>保存新密码
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><strong>数据管理</strong></div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <button class="btn btn-outline-warning" onclick="clearData('ad_accounts')">
+                        <i class="fas fa-eraser me-1"></i>清空广告账户数据
+                    </button>
+                    <button class="btn btn-outline-warning" onclick="clearData('bm_list')">
+                        <i class="fas fa-eraser me-1"></i>清空BM数据
+                    </button>
+                    <button class="btn btn-outline-warning" onclick="clearData('pixels')">
+                        <i class="fas fa-eraser me-1"></i>清空Pixel数据
+                    </button>
+                    <button class="btn btn-outline-warning" onclick="clearData('ad_library_items')">
+                        <i class="fas fa-eraser me-1"></i>清空素材库
+                    </button>
+                    <button class="btn btn-danger" onclick="if(confirm('确定清空所有数据？'))clearData('all')">
+                        <i class="fas fa-trash me-1"></i>清空所有数据
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Logs -->
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header"><strong>最近操作日志</strong></div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm data-table mb-0">
+                        <thead class="table-light"><tr><th>时间</th><th>操作</th><th>详情</th></tr></thead>
+                        <tbody id="logsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/js/settings.js"></script>{% endblock %}

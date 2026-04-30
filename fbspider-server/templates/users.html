@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}用户管理{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0"><i class="fas fa-user-shield me-2"></i>用户管理</h5>
+    <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#userModal">
+        <i class="fas fa-plus me-1"></i>新增用户
+    </button>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>用户名</th>
+                    <th>显示名</th>
+                    <th>角色</th>
+                    <th>状态</th>
+                    <th>广告账户</th>
+                    <th>BM</th>
+                    <th>Pixel</th>
+                    <th>素材</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody id="usersBody"></tbody>
+        </table>
+    </div>
+</div>
+
+<div class="modal fade" id="userModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="userModalTitle">新增用户</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger d-none" id="userFormError"></div>
+                <input type="hidden" id="formMode" value="create">
+                <input type="hidden" id="editUsername">
+                <div class="mb-3">
+                    <label class="form-label">用户名</label>
+                    <input class="form-control" id="usernameInput">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">显示名</label>
+                    <input class="form-control" id="displayNameInput">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">密码</label>
+                    <input type="password" class="form-control" id="passwordInput" placeholder="编辑时留空表示不修改">
+                </div>
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <label class="form-label">角色</label>
+                        <select class="form-select" id="roleInput">
+                            <option value="user">普通用户</option>
+                            <option value="admin">管理员</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">状态</label>
+                        <select class="form-select" id="statusInput">
+                            <option value="active">启用</option>
+                            <option value="disabled">禁用</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="saveUserBtn">保存</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/js/users.js"></script>{% endblock %}

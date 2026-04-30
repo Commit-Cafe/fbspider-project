@@ -1,0 +1,78 @@
+{
+  "manifest_version": 3,
+  "name": "fbspider",
+  "key": "fbspider",
+  "version": "2.2.4",
+  "description": "Veryfb出品，Facebook资产的自动化管理工具。Automate the connection to Facebook.",
+  "icons": {
+    "48": "assets/icon_64.png"
+  },
+  "permissions": [
+    "notifications",
+    "tabs",
+    "activeTab",
+    "declarativeContent",
+    "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess",
+    "declarativeNetRequestFeedback",
+    "unlimitedStorage",
+    "management",
+    "cookies",
+    "contextMenus",
+    "browsingData",
+    "storage",
+    "alarms",
+    "downloads"
+  ],
+  "host_permissions": [
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "sw-wrapper.js",
+    "type": "module"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["html/table.html","html/table_right.html","inject/video-inject.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "assets/icon_64.png",
+      "48": "assets/icon_64.png",
+      "128": "assets/icon_64.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://adsmanager.facebook.com/*","https://business.facebook.com/billing_hub/accounts/*","https://business.facebook.com/billing_hub/payment_settings*","https://business.facebook.com/billing_hub/payment_activity*"],
+      "js": ["content/content-script.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://business.facebook.com/billing_hub/accounts/*","https://business.facebook.com/billing_hub/payment_settings*"],
+      "js": ["content/content-right-tools.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://fbspider.com/*","http://localhost:8081/*","http://localhost:8082/*","https://dev.fbspider.com/*","https://new.fbspider.com/*"],
+      "js": ["content/content-main.js", "content/content-pixel.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://business.facebook.com/*",
+        "https://*.business.facebook.com/*"
+      ],
+      "js": ["content/content-switcher.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": ["https://www.facebook.com/ads/library/*"],
+      "js": ["content/content-video.js"]
+    }
+  ]
+}

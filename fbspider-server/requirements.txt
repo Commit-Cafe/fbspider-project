@@ -1,0 +1,6 @@
+flask>=3.0
+flask-cors>=4.0
+pymongo>=4.0
+gevent>=24.0
+websockets>=13.0
+minio>=7.0

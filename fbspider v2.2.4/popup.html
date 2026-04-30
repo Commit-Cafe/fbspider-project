@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>BM 界面切换器</title>
+    <link rel="stylesheet" href="assets/styles/popup.css"/>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <img class="logo" src="assets/icon_64.png" alt="fbspider" width="24" height="24" />
+        <h1>fbspider 便捷操作面板</h1>
+    </div>
+
+    <!-- 仅保留三个操作按钮 -->
+    <div class="buttons">
+        <div class="buttons-row">
+            <button id="toNewBtn" class="btn btn-secondary">
+                <i class="fas fa-right-long"></i> 切换到BM新界面
+            </button>
+            <button id="toOldBtn" class="btn btn-secondary">
+                <i class="fas fa-left-long"></i> 切换到BM旧界面
+            </button>
+        </div>
+
+        <button id="fbspiderBtn" class="btn btn-primary">
+            <i class="fas fa-external-link-alt"></i> 打开 fbspider 后台
+        </button>
+    </div>
+
+    <!-- 轻量提示区（非必须） -->
+    <div class="error" id="msg" style="display:none; margin-top:10px;">
+        <p class="error-text" id="msgText"></p>
+    </div>
+</div>
+
+<script src="popup.js"></script>
+</body>
+</html>

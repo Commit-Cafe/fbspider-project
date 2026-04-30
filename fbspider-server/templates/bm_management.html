@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}BM 管理{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h5 class="mb-0"><i class="fas fa-building me-2"></i>Business Manager 管理</h5>
+    <button class="btn btn-primary btn-sm" onclick="refreshBMFromExtension()">
+        <i class="fas fa-sync-alt me-1"></i>从Facebook获取BM列表
+    </button>
+</div>
+<div class="row">
+    <!-- BM List -->
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header py-2"><strong>BM 列表</strong></div>
+            <div class="card-body p-2" id="bmList" style="max-height:70vh;overflow-y:auto;">
+                <div class="text-center text-muted py-3">加载中...</div>
+            </div>
+        </div>
+    </div>
+    <!-- BM Detail -->
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header py-2"><strong id="bmDetailTitle">选择一个 BM 查看详情</strong></div>
+            <div class="card-body" id="bmDetail">
+                <p class="text-muted">点击左侧 BM 查看详情和旗下广告账户</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/js/bm.js"></script>{% endblock %}

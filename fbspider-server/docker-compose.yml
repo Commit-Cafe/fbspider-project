@@ -1,0 +1,13 @@
+services:
+  fbhelper:
+    build: .
+    container_name: fbhelper-server
+    ports:
+      - "7150:7150"
+      - "7671:7671"
+    volumes:
+      - ./callback_logs:/app/callback_logs
+    environment:
+      - MONGO_URI=mongodb://R3sW8kLm:J6tH2zLx9VwM5qDb@172.31.40.125:27017/plat?authSource=plat
+      - ACCOUNT_DSL_CALLBACK_INTERVAL_MINUTES=10
+    restart: unless-stopped
