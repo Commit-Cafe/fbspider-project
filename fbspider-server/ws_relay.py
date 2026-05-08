@@ -82,6 +82,9 @@ async def _ws_handler(websocket):
                     "result": result,
                     "created_at": datetime.utcnow().isoformat(),
                 }
+                # 定期清理过期结果
+                if len(task_results) > 100:
+                    _cleanup_old_results()
 
     except websockets.exceptions.ConnectionClosed:
         pass  # normal disconnect, no need to log
@@ -166,6 +169,21 @@ def get_task_result(task_id):
     if entry is None:
         return None
     return entry["result"]
+
+
+def _cleanup_old_results():
+    """清理超过 30 分钟的任务结果缓存"""
+    from datetime import timedelta
+    max_age = timedelta(minutes=30)
+    now = datetime.utcnow()
+    expired = [
+        tid for tid, entry in task_results.items()
+        if now - datetime.fromisoformat(entry["created_at"]) > max_age
+    ]
+    for tid in expired:
+        del task_results[tid]
+    if expired:
+        print(f"[WS] 清理过期任务结果: {len(expired)} 条")
 
 
 def list_devices():

@@ -146,4 +146,4 @@ if __name__ == '__main__':
     init_db()
     print("fbhelper Local Server starting...")
     print("Dashboard: http://47.129.247.139:7150/dashboard")
-    app.run(host='0.0.0.0', port=7150, debug=True)
+    app.run(host='0.0.0.0', port=7150, debug=False, use_reloader=False)
