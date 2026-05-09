@@ -11,13 +11,24 @@ bp = Blueprint("api_pixel", __name__, url_prefix="/api/open/pixel")
 SCOPE = "device-control"
 
 
+def _check_device_logged_in(did):
+    """检查设备是否已登录，返回 (username, error_msg)"""
+    dev_info = list_devices().get(did, {})
+    username = dev_info.get("username")
+    if not username:
+        return None, "所有在线设备均未登录 Facebook，请先在浏览器中登录 Facebook 并刷新插件页面"
+    return username, None
+
+
 def _resolve_device(body):
     if body.get("device"):
         did = pick_device(body["device"])
         if not did:
             return None, None, f"没有匹配 {body['device']} 的在线设备"
-        dev_info = list_devices().get(did, {})
-        return did, dev_info.get("username"), None
+        username, err = _check_device_logged_in(did)
+        if err:
+            return None, None, err
+        return did, username, None
 
     if body.get("account_id"):
         did, username, err = find_device_by_account(body["account_id"])
@@ -34,8 +45,10 @@ def _resolve_device(body):
     did = pick_device()
     if not did:
         return None, None, "没有在线设备"
-    dev_info = list_devices().get(did, {})
-    return did, dev_info.get("username"), None
+    username, err = _check_device_logged_in(did)
+    if err:
+        return None, None, err
+    return did, username, None
 
 
 def _send(device_id, action, params):

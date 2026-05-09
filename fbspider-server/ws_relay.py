@@ -99,15 +99,25 @@ async def _ws_handler(websocket):
 # ============ 指令发送 ============
 
 def pick_device(device_id_prefix=None):
-    """按前缀匹配设备，无前缀则返回第一个"""
+    """按前缀匹配设备；无前缀时优先选已登录（username 非空）的设备"""
     if not devices:
         return None
     if not device_id_prefix:
+        # 优先选已登录设备
+        for did, dev in devices.items():
+            if dev.get("username"):
+                return did
+        # 全部未登录，返回第一个
         return list(devices.keys())[0]
+    # 前缀匹配：同样优先已登录
+    fallback = None
     for did in devices:
         if did.startswith(device_id_prefix):
-            return did
-    return None
+            if not fallback:
+                fallback = did
+            if devices[did].get("username"):
+                return did
+    return fallback
 
 
 def find_device_by_username(username):
