@@ -7,8 +7,7 @@ from flask import Blueprint, jsonify, request
 
 from auth import api_admin_required
 from ws_relay import (
-    list_devices, pick_device, send_command, get_task_result,
-    find_device_by_username, find_device_by_account,
+    list_devices, send_command, get_task_result, resolve_device,
 )
 
 bp = Blueprint("api_device_control", __name__, url_prefix="/api/device-control")
@@ -16,53 +15,27 @@ bp = Blueprint("api_device_control", __name__, url_prefix="/api/device-control")
 
 def _resolve_device(body):
     """
-    解析目标设备，优先级:
-    1. body.device  — 直接指定设备 ID 前缀
-    2. body.account_id — 通过 account→user→device 自动路由
-    3. 回退到第一个在线设备
-    返回 (device_id, username, error_msg, route_trace)
+    解析目标设备，返回 (device_id, username, error_msg, route_trace)
     """
     trace = []
-    # 方式1: 直接指定设备
+
     if body.get("device"):
-        trace.append({"step": "device_input", "mode": "manual_device", "device_prefix": body["device"]})
-        did = pick_device(body["device"])
-        if not did:
-            trace.append({"step": "device_match_failed", "reason": "no_device_prefix_match"})
-            return None, None, f"没有匹配 {body['device']} 的在线设备", trace
-        dev_info = list_devices().get(did, {})
-        trace.append({"step": "device_selected", "device_id": did, "username": dev_info.get("username")})
-        return did, dev_info.get("username"), None, trace
+        mode = "manual_device"
+    elif body.get("account_id"):
+        mode = "account_auto_route"
+    elif body.get("username"):
+        mode = "username_route"
+    else:
+        mode = "fallback_first_online"
 
-    # 方式2: 按账户自动路由
-    if body.get("account_id"):
-        trace.append({"step": "device_input", "mode": "account_auto_route", "account_id": str(body["account_id"])})
-        did, username, err = find_device_by_account(body["account_id"])
-        if err:
-            trace.append({"step": "device_match_failed", "reason": err, "username": username})
-            return None, username, err, trace
-        trace.append({"step": "device_selected", "device_id": did, "username": username})
-        return did, username, None, trace
+    trace.append({"step": "device_input", "mode": mode})
 
-    # 方式3: 按用户名查找
-    if body.get("username"):
-        trace.append({"step": "device_input", "mode": "username_route", "username": body["username"]})
-        did = find_device_by_username(body["username"])
-        if not did:
-            trace.append({"step": "device_match_failed", "reason": "username_no_online_device", "username": body["username"]})
-            return None, body["username"], f"用户 {body['username']} 没有在线设备", trace
-        trace.append({"step": "device_selected", "device_id": did, "username": body["username"]})
-        return did, body["username"], None, trace
-
-    # 回退: 第一个在线设备
-    trace.append({"step": "device_input", "mode": "fallback_first_online"})
-    did = pick_device()
-    if not did:
-        trace.append({"step": "device_match_failed", "reason": "no_online_device"})
-        return None, None, "没有在线设备", trace
-    dev_info = list_devices().get(did, {})
-    trace.append({"step": "device_selected", "device_id": did, "username": dev_info.get("username")})
-    return did, dev_info.get("username"), None, trace
+    did, username, err = resolve_device(body)
+    if err:
+        trace.append({"step": "device_match_failed", "reason": err})
+        return None, username, err, trace
+    trace.append({"step": "device_selected", "device_id": did, "username": username})
+    return did, username, None, trace
 
 
 def _send(device_id, action, params, route_trace=None):

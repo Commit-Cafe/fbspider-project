@@ -19,8 +19,10 @@ from config import (
     ACCOUNT_DSL_CALLBACK_SECRET,
     ACCOUNT_DSL_STARTUP_REFRESH_WAIT_SECONDS,
     ACCOUNT_DSL_CALLBACK_URL,
+    CURRENCY_OFFSETS,
 )
 from models import add_action_log, get_db
+from logger import logger
 
 _scheduler_started = False
 _scheduler_lock = threading.Lock()
@@ -29,14 +31,6 @@ _account_dsl_job_id = "account_dsl_callback"
 _refresh_job_id = "plugin_refresh_all_accounts"
 _startup_refresh_job_id = "startup_bootstrap_refresh"
 _startup_callback_job_id = "startup_bootstrap_callback"
-
-_CURRENCY_OFFSETS = {
-    'BIF': 1, 'CLP': 1, 'COP': 1, 'CRC': 1, 'CVE': 1, 'DJF': 1,
-    'GNF': 1, 'HUF': 1, 'IDR': 1, 'ISK': 1, 'JPY': 1, 'KMF': 1,
-    'KRW': 1, 'PYG': 1, 'RWF': 1, 'TWD': 1, 'UGX': 1, 'VND': 1,
-    'VUV': 1, 'XAF': 1, 'XOF': 1, 'XPF': 1,
-    'MGA': 5, 'MRO': 5,
-}
 
 
 def _is_enabled():
@@ -56,7 +50,7 @@ def _callback_interval_minutes():
 
 
 def _get_offset(currency):
-    return _CURRENCY_OFFSETS.get(str(currency or "").upper(), 100)
+    return CURRENCY_OFFSETS.get(str(currency or "").upper(), 100)
 
 
 def _current_slot_key(now=None):
@@ -191,6 +185,51 @@ def _safe_slot_filename(slot_key):
     return re.sub(r"[^0-9A-Za-z._-]+", "_", str(slot_key or "unknown"))
 
 
+_CALLBACK_LOG_MAX_AGE_DAYS = 7
+_CALLBACK_LOG_MAX_FILES = 2000
+_CALLBACK_LOG_CLEANUP_INTERVAL = 20
+_callback_log_write_counter = 0
+
+
+def _cleanup_old_callback_logs():
+    global _callback_log_write_counter
+    _callback_log_write_counter += 1
+    if _callback_log_write_counter % _CALLBACK_LOG_CLEANUP_INTERVAL != 0:
+        return
+    if not os.path.isdir(ACCOUNT_DSL_CALLBACK_LOG_DIR):
+        return
+    try:
+        now = time.time()
+        cutoff = now - _CALLBACK_LOG_MAX_AGE_DAYS * 86400
+        files = []
+        for fname in os.listdir(ACCOUNT_DSL_CALLBACK_LOG_DIR):
+            fpath = os.path.join(ACCOUNT_DSL_CALLBACK_LOG_DIR, fname)
+            if not os.path.isfile(fpath):
+                continue
+            try:
+                mtime = os.path.getmtime(fpath)
+            except OSError:
+                continue
+            if mtime < cutoff:
+                try:
+                    os.remove(fpath)
+                except OSError:
+                    pass
+            else:
+                files.append((mtime, fpath))
+
+        if len(files) > _CALLBACK_LOG_MAX_FILES:
+            files.sort(key=lambda x: x[0])
+            remove_count = len(files) - _CALLBACK_LOG_MAX_FILES
+            for _, fpath in files[:remove_count]:
+                try:
+                    os.remove(fpath)
+                except OSError:
+                    pass
+    except Exception as exc:
+        logger.error("日志清理异常: %s", exc)
+
+
 def _persist_callback_log(log_data):
     if not _is_full_callback_log_enabled():
         return ""
@@ -203,6 +242,8 @@ def _persist_callback_log(log_data):
     filepath = os.path.join(ACCOUNT_DSL_CALLBACK_LOG_DIR, filename)
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(log_data, f, ensure_ascii=False, indent=2, default=str)
+
+    _cleanup_old_callback_logs()
     return filepath
 
 
@@ -237,7 +278,7 @@ def _log_scheduler(event, **fields):
             payload["log_file"] = _persist_scheduler_event(event, payload)
         except Exception as exc:
             payload["log_persist_error"] = str(exc)
-    print("[fbhelper-scheduler]", json.dumps(payload, ensure_ascii=False, default=str), flush=True)
+    logger.info("%s", json.dumps(payload, ensure_ascii=False, default=str))
 
 
 def _log_callback_upload(stage, slot_key, items=None, status_code=None, response_text=None, error_text=None):
@@ -266,7 +307,7 @@ def _log_callback_upload(stage, slot_key, items=None, status_code=None, response
         summary.pop("items", None)
     if log_file:
         summary["log_file"] = log_file
-    print("[fbhelper-callback]", json.dumps(summary, ensure_ascii=False, default=str), flush=True)
+    logger.info("%s", json.dumps(summary, ensure_ascii=False, default=str))
     return log_file
 
 

@@ -82,6 +82,13 @@ async function request(method, url, data, _retries = 2) {
   }
   try {
     const resp = await fetch(finalUrl, opts);
+    if (resp.status === 401) {
+      setAuthToken('');
+      setCurrentUserId('');
+      setAuthUser(null);
+      window.location.href = '/login';
+      return { success: false, message: '登录已过期，请重新登录' };
+    }
     return await resp.json();
   } catch (err) {
     // Retry on network errors (ERR_CONTENT_LENGTH_MISMATCH, etc.)

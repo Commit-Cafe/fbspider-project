@@ -5,22 +5,10 @@ from models import (upsert_ad_account, upsert_bm, upsert_bm_ad_account,
                      upsert_ad_account_user, upsert_pixel, upsert_pixel_association,
                      save_pixel_purchases, upsert_ad_library_item, set_extension_state,
                      add_action_log, upsert_campaign, update_account_dsl_status)
-
-# Currency offset mapping — matches background.js currencySymbols.offset values.
-# offset=1: API returns base units (no division needed)
-# offset=5: divide by 5
-# offset=100 (default): divide by 100
-CURRENCY_OFFSETS = {
-    'BIF': 1, 'CLP': 1, 'COP': 1, 'CRC': 1, 'CVE': 1, 'DJF': 1,
-    'GNF': 1, 'HUF': 1, 'IDR': 1, 'ISK': 1, 'JPY': 1, 'KMF': 1,
-    'KRW': 1, 'PYG': 1, 'RWF': 1, 'TWD': 1, 'UGX': 1, 'VND': 1,
-    'VUV': 1, 'XAF': 1, 'XOF': 1, 'XPF': 1,
-    'MGA': 5, 'MRO': 5,
-}
+from config import CURRENCY_OFFSETS
 
 
 def _get_offset(currency):
-    """Get the currency offset divisor. Default 100 for most currencies."""
     return CURRENCY_OFFSETS.get(currency, 100)
 
 # Common currency symbols — matches background.js getCurrencySymbol()

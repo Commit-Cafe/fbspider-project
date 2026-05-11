@@ -279,16 +279,23 @@ function fetchFbTokensAndCookies() {
     }).then(function (html) {
       var tokens = extractFbTokens(html);
       tokens.cookies = cookies;
-      // 用 cookies 引用而不是手动拼接（浏览器会自动发送 cookie）
       tokens.cookieStr = '__use_credentials_include__';
       if (!tokens.userId && cookies.c_user) {
         tokens.userId = cookies.c_user;
       }
-      console.log('[PixelShare] Token 提取: fb_dtsg=' + (tokens.fbDtsg ? 'OK' : 'FAIL') +
-        ', lsd=' + (tokens.lsd ? 'OK' : 'FAIL') +
-        ', userId=' + tokens.userId +
-        ', bmId=' + tokens.bmId);
-      return tokens;
+
+      return getCurrentBmFromTabs().then(function(tabBmId) {
+        if (tabBmId) {
+          tokens.currentBmId = tabBmId;
+          console.log('[PixelShare] 当前浏览器 BM=' + tabBmId + ' (从 URL 提取)');
+        }
+        console.log('[PixelShare] Token 提取: fb_dtsg=' + (tokens.fbDtsg ? 'OK' : 'FAIL') +
+          ', lsd=' + (tokens.lsd ? 'OK' : 'FAIL') +
+          ', userId=' + tokens.userId +
+          ', bmId=' + tokens.bmId +
+          ', currentBmId=' + (tokens.currentBmId || 'N/A'));
+        return tokens;
+      });
     }).catch(function (err) {
       console.error('[PixelShare] 获取 Facebook 页面失败:', err);
       return {
@@ -296,9 +303,35 @@ function fetchFbTokensAndCookies() {
         lsd: null,
         userId: cookies.c_user || null,
         bmId: null,
+        currentBmId: null,
         cookies: cookies,
         cookieStr: null
       };
+    });
+  });
+}
+
+function getCurrentBmFromTabs() {
+  return new Promise(function(resolve) {
+    chrome.tabs.query({ url: ['*://business.facebook.com/*'] }, function(tabs) {
+      if (!tabs || tabs.length === 0) {
+        resolve(null);
+        return;
+      }
+      for (var i = 0; i < tabs.length; i++) {
+        var url = tabs[i].url || '';
+        var m = url.match(/[?&]business_id=(\d+)/);
+        if (m) {
+          resolve(m[1]);
+          return;
+        }
+        var m2 = url.match(/\/settings\/(\d+)\//);
+        if (m2) {
+          resolve(m2[1]);
+          return;
+        }
+      }
+      resolve(null);
     });
   });
 }
@@ -368,19 +401,15 @@ function fbGraphqlRequest(tokens, formBody) {
 }
 
 function validateSharePixel(tokens, params) {
-  var businessID = params.business_id || tokens.bmId;
+  var businessID = params.business_id || tokens.currentBmId || tokens.bmId;
+  var bidForRequest = businessID;
   var variables = JSON.stringify({
-    businessID: businessID,
     assetID: params.pixel_id,
-    surfaceParams: {
-      entry_point: 'BIZWEB_SETTINGS_ASSETS_VIEW_DETAILS_HEADER',
-      flow_source: 'BIZ_WEB',
-      tab: 'EVENTS_DATASET'
-    },
-    toBusinessID: params.target_account_id
+    businessID: businessID,
+    partnerBusinessID: params.target_account_id
   });
 
-  var formBody = buildFormBody(tokens, FRIENDLY_NAME_VALIDATE, variables, DOC_ID_VALIDATE, businessID);
+  var formBody = buildFormBody(tokens, FRIENDLY_NAME_VALIDATE, variables, DOC_ID_VALIDATE, bidForRequest);
   return fbGraphqlRequest(tokens, formBody);
 }
 
@@ -389,26 +418,51 @@ function sharePixelToBm(tokens, params) {
     return Promise.reject(new Error('缺少 fb_dtsg 或 lsd token'));
   }
 
-  var businessID = params.business_id || tokens.bmId;
+  var businessID = params.business_id || tokens.currentBmId || tokens.bmId;
   if (!businessID) {
     return Promise.reject(new Error('缺少 businessID (BM ID)'));
   }
-  console.log('[PixelShare] 使用 businessID=' + businessID + (params.business_id ? ' (指定)' : ' (自动检测)'));
 
-  var variables = JSON.stringify({
-    businessID: businessID,
-    assetID: params.pixel_id,
-    surfaceParams: {
-      entry_point: 'BIZWEB_SETTINGS_ASSETS_VIEW_DETAILS_HEADER',
-      flow_source: 'BIZ_WEB',
-      tab: 'EVENTS_DATASET'
-    },
-    toBusinessID: params.target_account_id,
-    taskIDs: params.task_ids || DEFAULT_TASK_IDS
+  var realAssetId = params.pixel_asset_id || null;
+
+  var doShare = function (assetId) {
+    var bidForRequest = businessID;
+    console.log('[PixelShare] 使用 businessID=' + businessID + ', assetID=' + assetId + ' (原始 pixel_id=' + params.pixel_id + ')' + ', __bid=' + bidForRequest);
+
+    var variables = JSON.stringify({
+      businessID: businessID,
+      assetID: assetId,
+      surfaceParams: {
+        entry_point: 'BIZWEB_SETTINGS_ASSETS_VIEW_DETAILS_HEADER',
+        flow_source: 'BIZ_WEB',
+        tab: 'EVENTS_DATASET'
+      },
+      toBusinessID: params.target_account_id,
+      taskIDs: params.task_ids || DEFAULT_TASK_IDS
+    });
+
+    console.log('[PixelShare] GraphQL variables: ' + variables);
+
+    var formBody = buildFormBody(tokens, FRIENDLY_NAME_SHARE, variables, DOC_ID_SHARE_MUTATION, bidForRequest);
+    return fbGraphqlRequest(tokens, formBody);
+  };
+
+  if (realAssetId) {
+    return doShare(realAssetId);
+  }
+
+  return searchPixelAssetId(tokens, {
+    pixel_id: params.pixel_id,
+    pixel_name: params.pixel_name,
+    business_id: businessID
+  }).then(function (searchResult) {
+    if (!searchResult) {
+      console.log('[PixelShare] 未找到像素真实 Asset ID，使用原始 pixel_id');
+      return doShare(params.pixel_id);
+    }
+    console.log('[PixelShare] 搜索到像素真实 Asset ID: ' + searchResult.asset_id + ' (' + searchResult.name + ')');
+    return doShare(searchResult.asset_id);
   });
-
-  var formBody = buildFormBody(tokens, FRIENDLY_NAME_SHARE, variables, DOC_ID_SHARE_MUTATION, businessID);
-  return fbGraphqlRequest(tokens, formBody);
 }
 
 // 搜索像素真实 asset ID（Dataset ID 或名称 → Facebook asset ID）
@@ -663,14 +717,105 @@ function parseShareResult(obj, depth) {
 
 function handleAuthorizePixel(params, taskId) {
   console.log('[PixelShare] 开始授权: pixel_id=' + params.pixel_id + ', target_account_id=' + params.target_account_id);
+  return ensureBmContext(params.business_id).then(function () {
+    return shareViaGraphql(params, taskId);
+  });
+}
 
-  // 优先使用 fbspider 原版分享接口（通过 background.js）
-  return shareViaFbspider(params, taskId)
-    .catch(function (err) {
-      console.log('[PixelShare] 原版接口失败，尝试 GraphQL:', err.message);
-      // 原版接口失败时，回退到 GraphQL
-      return shareViaGraphql(params, taskId);
+function ensureBmContext(businessId) {
+  return new Promise(function(resolve) {
+    if (!businessId) {
+      resolve();
+      return;
+    }
+
+    chrome.tabs.query({ url: ['*://business.facebook.com/*'] }, function(tabs) {
+      var alreadyOpen = false;
+      if (tabs) {
+        for (var i = 0; i < tabs.length; i++) {
+          var url = tabs[i].url || '';
+          if (url.indexOf('business_id=' + businessId) !== -1 ||
+              url.indexOf('/' + businessId + '/') !== -1) {
+            alreadyOpen = true;
+            break;
+          }
+        }
+      }
+
+      if (alreadyOpen) {
+        console.log('[PixelShare] BM ' + businessId + ' 页面已打开');
+        resolve();
+        return;
+      }
+
+      console.log('[PixelShare] 正在打开 BM ' + businessId + ' 页面...');
+      var bmUrl = 'https://business.facebook.com/latest/settings/events_dataset_and_pixel/?business_id=' + businessId;
+      chrome.tabs.create({ url: bmUrl, active: false }, function(tab) {
+        console.log('[PixelShare] 已打开 BM 页面, tab=' + tab.id + ', 等待加载...');
+        var listener = function(tabId, changeInfo) {
+          if (tabId === tab.id && changeInfo.status === 'complete') {
+            chrome.tabs.onUpdated.removeListener(listener);
+            console.log('[PixelShare] BM 页面加载完成');
+            setTimeout(function() {
+              resolve();
+            }, 2000);
+          }
+        };
+        chrome.tabs.onUpdated.addListener(listener);
+        setTimeout(function() {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }, 15000);
+      });
     });
+  });
+}
+
+function shareViaFbspiderAddAccount(params, taskId) {
+  return new Promise(function (resolve, reject) {
+    chrome.tabs.query({ url: ['*://fbspider.com/*', '*://*.fbspider.com/*', 'http://localhost:8081/*', 'http://localhost:8082/*'] }, function (tabs) {
+      if (!tabs || tabs.length === 0) {
+        reject(new Error('没有打开 fbspider.com 页面'));
+        return;
+      }
+
+      var tab = tabs[0];
+      console.log('[PixelShare] 通过 fbspider.com 页面调用 addAccount, tab=' + tab.id);
+
+      chrome.tabs.sendMessage(tab.id, {
+        type: 'addAccount',
+        params: {
+          accountID: params.pixel_id,
+          bmID: params.target_account_id
+        }
+      }, function (response) {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
+        if (!response) {
+          reject(new Error('content-pixel.js 无响应'));
+          return;
+        }
+
+        console.log('[PixelShare] addAccount 响应:', JSON.stringify(response).substring(0, 500));
+
+        if (response.success) {
+          var result = {
+            status: 'ok',
+            pixel_id: params.pixel_id,
+            target_account_id: params.target_account_id,
+            authorized: true,
+            message: '分享操作已发送'
+          };
+          sendTaskResult(taskId, result);
+          resolve(result);
+        } else {
+          reject(new Error(response.data || 'addAccount 返回失败'));
+        }
+      });
+    });
+  });
 }
 
 // 处理像素分享给广告账户（支持自动查询真实 asset ID）
@@ -828,121 +973,153 @@ function shareViaGraphql(params, taskId) {
 
       console.log('[PixelShare] Token 获取成功: user=' + tokens.userId + ', bm=' + (tokens.bmId || params.business_id));
 
-      // 先执行验证查询，获取 Facebook 的预检结果
-      return validateSharePixel(tokens, params).then(function (validateResult) {
-        var validateStr = JSON.stringify(validateResult);
-        console.log('[PixelShare] 验证响应:', validateStr);
+      return sharePixelToBm(tokens, params).then(function (shareResult) {
+        var fullStr = JSON.stringify(shareResult);
+        console.log('[PixelShare] 分享响应:', fullStr);
 
-        // 从验证响应中提取错误信息（用于辅助翻译）
-        var validateError = '';
-        var validateParsed = parseShareResult(validateResult);
-        if (!validateParsed.success) {
-          validateError = validateParsed.message;
-        }
-        // 也从深层提取 message
-        var validateMessages = extractFbMessages(validateResult);
-        var allErrorText = validateError + ' ' + validateMessages.join(' ');
-
-        // 执行实际分享
-        return sharePixelToBm(tokens, params).then(function (shareResult) {
-          var fullStr = JSON.stringify(shareResult);
-          console.log('[PixelShare] 分享响应:', fullStr);
-
-          // 提取已有合作伙伴信息
-          var alreadyShared = false;
-          var partnerNames = [];
-          try {
-            var conn = shareResult.data &&
-              shareResult.data.business_settings_add_partner_to_asset_connection;
-            if (conn && conn.business_asset) {
-              var lists = [
-                conn.business_asset.fullControlPartnerAgencies,
-                conn.business_asset.partialAccessPartnerAgencies,
-                conn.business_asset.pendingPartnerAgencies
-              ];
-              for (var li = 0; li < lists.length; li++) {
-                var list = lists[li];
-                if (list && list.edges) {
-                  for (var i = 0; i < list.edges.length; i++) {
-                    var node = list.edges[i].node;
-                    if (node) {
-                      var label = li === 2 ? '[待确认]' : '';
-                      partnerNames.push(label + node.name + '(' + node.id + ')');
-                      if (String(node.id) === String(params.target_account_id)) {
-                        alreadyShared = true;
-                      }
+        var alreadyShared = false;
+        var partnerNames = [];
+        var ownerBmId = null;
+        try {
+          var conn = shareResult.data &&
+            shareResult.data.business_settings_add_partner_to_asset_connection;
+          if (conn && conn.business_asset) {
+            var lists = [
+              conn.business_asset.fullControlPartnerAgencies,
+              conn.business_asset.partialAccessPartnerAgencies,
+              conn.business_asset.pendingPartnerAgencies
+            ];
+            for (var li = 0; li < lists.length; li++) {
+              var list = lists[li];
+              if (list && list.edges) {
+                for (var i = 0; i < list.edges.length; i++) {
+                  var node = list.edges[i].node;
+                  if (node) {
+                    var label = li === 2 ? '[待确认]' : '';
+                    partnerNames.push(label + node.name + '(' + node.id + ')');
+                    if (String(node.id) === String(params.target_account_id)) {
+                      alreadyShared = true;
+                    }
+                    if (li === 0 && !ownerBmId) {
+                      ownerBmId = node.id;
                     }
                   }
                 }
               }
             }
+          }
+        } catch (e) {}
+
+        var parsed = parseShareResult(shareResult);
+
+        if (!parsed.success && alreadyShared) {
+          console.log('[PixelShare] 虽返回 FAILURE，但目标 BM 已在合作伙伴列表中，视为已授权');
+          parsed = {
+            success: true,
+            message: '目标 BM 已拥有该像素权限（无需重复分享）'
+          };
+        }
+
+        if (!parsed.success) {
+          var hasErrors = shareResult.errors && shareResult.errors.length > 0;
+          var currentBusinessID = params.business_id || tokens.bmId;
+          var sessionBmId = tokens.currentBmId || tokens.bmId;
+
+          if (!hasErrors && currentBusinessID && sessionBmId && String(currentBusinessID) !== String(sessionBmId)) {
+            console.log('[PixelShare] BM 上下文不匹配: 指定 BM=' + currentBusinessID + ', session BM=' + sessionBmId + '，尝试用 session BM 重试');
+            var retryParams2 = JSON.parse(JSON.stringify(params));
+            retryParams2.business_id = String(sessionBmId);
+            return sharePixelToBm(tokens, retryParams2).then(function (retryResult2) {
+              console.log('[PixelShare] session BM 重试响应:', JSON.stringify(retryResult2).substring(0, 800));
+              var retryParsed2 = parseShareResult(retryResult2);
+              if (retryParsed2.success) {
+                retryParsed2.message = '已通过 session BM(' + sessionBmId + ')分享成功';
+              } else {
+                retryParsed2.message = '分享失败（已尝试指定 BM 和 session BM）。可能是 BM 权限不足或像素不属于该 BM';
+                retryParsed2.message += ' [指定BM: ' + currentBusinessID + ', session BM: ' + sessionBmId + ']';
+              }
+              var retryResultObj2 = {
+                status: retryParsed2.success ? 'ok' : 'error',
+                pixel_id: params.pixel_id,
+                target_account_id: params.target_account_id,
+                authorized: retryParsed2.success,
+                message: retryParsed2.message
+              };
+              sendTaskResult(taskId, retryResultObj2);
+              return retryResultObj2;
+            });
+          }
+
+          if (!hasErrors) {
+            parsed.message = 'Facebook 返回 FAILURE';
+            parsed.message += ' [源BM: ' + currentBusinessID + ', 目标BM: ' + params.target_account_id + ']';
+          }
+        }
+
+        if (!parsed.success && ownerBmId) {
+          var currentBusinessID = params.business_id || tokens.bmId;
+          if (String(ownerBmId) !== String(currentBusinessID)) {
+            console.log('[PixelShare] 检测到像素所有者 BM=' + ownerBmId + '，与指定 BM=' + currentBusinessID + ' 不同，自动用所有者 BM 重试');
+            var retryParams = JSON.parse(JSON.stringify(params));
+            retryParams.business_id = String(ownerBmId);
+            return sharePixelToBm(tokens, retryParams).then(function (retryResult) {
+              console.log('[PixelShare] 重试响应:', JSON.stringify(retryResult).substring(0, 1000));
+              var retryParsed = parseShareResult(retryResult);
+              var retryMessage = retryParsed.message;
+              if (!retryParsed.success) {
+                retryMessage = '使用所有者BM(' + ownerBmId + ')重试仍然失败: ' + retryMessage;
+              } else {
+                retryMessage = '已通过像素所有者BM(' + ownerBmId + ')分享成功';
+              }
+              var retryResultObj = {
+                status: retryParsed.success ? 'ok' : 'error',
+                pixel_id: params.pixel_id,
+                target_account_id: params.target_account_id,
+                authorized: retryParsed.success,
+                message: retryMessage
+              };
+              sendTaskResult(taskId, retryResultObj);
+              return retryResultObj;
+            });
+          }
+        }
+
+        if (!parsed.success) {
+          var sourceBm = params.business_id || tokens.bmId;
+
+          var pixelName = '';
+          try {
+            var asset = shareResult.data &&
+              shareResult.data.business_settings_add_partner_to_asset_connection &&
+              shareResult.data.business_settings_add_partner_to_asset_connection.business_asset;
+            if (asset && asset.business_object_name) {
+              pixelName = asset.business_object_name;
+            }
           } catch (e) {}
 
-          var parsed = parseShareResult(shareResult);
-
-          // 如果 FAILURE 但目标 BM 已在合作伙伴列表中，视为成功
-          if (!parsed.success && alreadyShared) {
-            console.log('[PixelShare] 虽返回 FAILURE，但目标 BM 已在合作伙伴列表中，视为已授权');
-            parsed = {
-              success: true,
-              message: '目标 BM 已拥有该像素权限（无需重复分享）'
-            };
+          if (String(sourceBm) === String(params.target_account_id)) {
+            parsed.message = '所属BM与目标BM相同，无法分享给自己。请检查所输入的业务编号并重试。';
+          } else {
+            parsed.message = '当前BM受限，该BM的像素无法分享';
+            if (pixelName) parsed.message += '（像素: ' + pixelName + '）';
+            parsed.message += ' [源BM: ' + sourceBm + ', 目标BM: ' + params.target_account_id + ']';
           }
 
-          // 翻译技术错误为友好的中文信息
-          if (!parsed.success) {
-            var sourceBm = params.business_id || tokens.bmId;
-
-            // 从响应中提取像素名称
-            var pixelName = '';
-            try {
-              var asset = shareResult.data &&
-                shareResult.data.business_settings_add_partner_to_asset_connection &&
-                shareResult.data.business_settings_add_partner_to_asset_connection.business_asset;
-              if (asset && asset.business_object_name) {
-                pixelName = asset.business_object_name;
-              }
-            } catch (e) {}
-
-            // 合并分享响应 + 验证响应的错误文本，用于全面匹配
-            var combinedMessage = parsed.message + ' ' + allErrorText;
-
-            // 源BM = 目标BM → 自己分享给自己
-            if (String(sourceBm) === String(params.target_account_id)) {
-              parsed.message = '所属BM与目标BM相同，无法分享给自己。请检查所输入的业务编号并重试。';
-            }
-            // GraphQL 返回 missing_required_variable_value / noncoercible_argument_value
-            else if (combinedMessage.indexOf('missing_required_variable_value') !== -1 ||
-                     combinedMessage.indexOf('noncoercible_argument_value') !== -1) {
-              parsed.message = '当前BM受限，该BM的像素无法分享';
-              if (pixelName) parsed.message += '（像素: ' + pixelName + '）';
-              parsed.message += ' [源BM: ' + sourceBm + ', 目标BM: ' + params.target_account_id + ']';
-            }
-            // result_type=FAILURE → 统一翻译为 BM 受限
-            else {
-              parsed.message = '当前BM受限，该BM的像素无法分享';
-              if (pixelName) parsed.message += '（像素: ' + pixelName + '）';
-              parsed.message += ' [源BM: ' + sourceBm + ', 目标BM: ' + params.target_account_id + ']';
-            }
-
-            // 补充合作伙伴信息
-            if (partnerNames.length > 0) {
-              parsed.message += ' | 当前合作伙伴: ' + partnerNames.join(', ');
-            }
+          if (partnerNames.length > 0) {
+            parsed.message += ' | 当前合作伙伴: ' + partnerNames.join(', ');
           }
+        }
 
-          var result = {
-            status: parsed.success ? 'ok' : 'error',
-            pixel_id: params.pixel_id,
-            target_account_id: params.target_account_id,
-            authorized: parsed.success,
-            message: parsed.message
-          };
+        var result = {
+          status: parsed.success ? 'ok' : 'error',
+          pixel_id: params.pixel_id,
+          target_account_id: params.target_account_id,
+          authorized: parsed.success,
+          message: parsed.message
+        };
 
-          // 通过 WS 上报结果
-          sendTaskResult(taskId, result);
-          return result;
-        });
+        sendTaskResult(taskId, result);
+        return result;
       });
     })
     .catch(function (err) {
@@ -953,7 +1130,6 @@ function shareViaGraphql(params, taskId) {
         message: err.message || '授权失败'
       };
       sendTaskResult(taskId, result);
-      // resolve 而非 reject，确保调用者（WS 指令 / content script）能正常处理
       return result;
     });
 }

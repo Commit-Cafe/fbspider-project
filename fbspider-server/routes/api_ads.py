@@ -42,7 +42,13 @@ def create_ad():
         return jsonify({"success": False, "message": "请填写广告系列名称"}), 400
 
     budget_amount = data.get("budget_amount") or data.get("daily_budget")
-    if not budget_amount or float(budget_amount) <= 0:
+    if not budget_amount:
+        return jsonify({"success": False, "message": "请填写有效的预算金额"}), 400
+    try:
+        budget_value = float(budget_amount)
+    except (ValueError, TypeError):
+        return jsonify({"success": False, "message": f"预算金额格式无效: {budget_amount}"}), 400
+    if budget_value <= 0:
         return jsonify({"success": False, "message": "请填写有效的预算金额"}), 400
 
     budget_level = data.get("budget_level", "campaign")  # 'campaign' (CBO) | 'adset' (ABO)
@@ -158,15 +164,12 @@ def get_task_progress(task_id):
 
 
 @bp.route("/tasks/progress", methods=["POST"])
+@api_login_required
 def update_task_progress():
-    """
-    Called by the Chrome extension to report step-by-step progress.
-    No @api_login_required — extension uses command_id to authenticate.
-    """
     data = request.get_json(silent=True) or {}
     command_id = data.get("command_id", "").strip()
     step_key = data.get("step_key", "").strip()
-    step_status = data.get("step_status", "done")  # done | error | running
+    step_status = data.get("step_status", "done")
     message = data.get("message", "")
     result_data = data.get("result")
 
@@ -177,6 +180,11 @@ def update_task_progress():
     task = db.ad_tasks.find_one({"command_id": command_id})
     if not task:
         return jsonify({"success": False, "message": "task not found"}), 404
+
+    user = get_current_user()
+    if user and user.get("role") != "admin":
+        if task.get("user_id") and task["user_id"] != user.get("username"):
+            return jsonify({"success": False, "message": "forbidden"}), 403
 
     # Update the matching step
     steps = task.get("progress", {}).get("steps", [])

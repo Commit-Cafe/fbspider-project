@@ -7,7 +7,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Python runtime
-FROM python:3.12-slim
+FROM python:3.12.10-slim-bookworm
 WORKDIR /app
 
 COPY requirements.txt .

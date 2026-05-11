@@ -3,6 +3,7 @@ import hashlib
 import secrets
 from datetime import datetime, timezone, timedelta
 from pymongo import MongoClient, ASCENDING, DESCENDING
+from logger import logger
 from werkzeug.security import generate_password_hash, check_password_hash
 from config import MONGO_URI, MONGO_DB
 
@@ -22,13 +23,20 @@ def normalize_role(role):
 def get_db():
     global _client
     if _client is None:
-        _client = MongoClient(MONGO_URI)
+        _client = MongoClient(
+            MONGO_URI,
+            connectTimeoutMS=5000,
+            serverSelectionTimeoutMS=5000,
+            maxPoolSize=20,
+            minPoolSize=2,
+            retryWrites=True,
+        )
     return _client[MONGO_DB]
 
 
 def init_db():
     db = get_db()
-    print("[init_db] Creating MongoDB indexes...")
+    logger.info("Creating MongoDB indexes...")
 
     _ensure_ad_accounts_indexes(db)
     _ensure_fbhelper_acc_indexes(db)
@@ -52,7 +60,7 @@ def init_db():
     db.auth_sessions.create_index([("username", ASCENDING), ("expires_at", DESCENDING)])
 
     ensure_default_admin()
-    print("[init_db] All indexes created successfully.")
+    logger.info("All indexes created successfully.")
 
 
 def _now():
@@ -153,7 +161,10 @@ def _ensure_api_key_indexes(db):
     # 从而在第二次插入时触发 duplicate key: { key: null }。
     for index_name, index_info in list(indexes.items()):
       if index_info.get("key") == [("key", 1)]:
-          collection.drop_index(index_name)
+          try:
+              collection.drop_index(index_name)
+          except Exception:
+              pass
           indexes.pop(index_name, None)
 
     key_hash_index = indexes.get(target_name)
@@ -165,7 +176,10 @@ def _ensure_api_key_indexes(db):
         if existing_key == [("key_hash", 1)] and is_unique and existing_filter == target_filter:
             pass
         else:
-            collection.drop_index(target_name)
+            try:
+                collection.drop_index(target_name)
+            except Exception:
+                pass
 
     collection.create_index(
         [("key_hash", ASCENDING)],
@@ -191,7 +205,9 @@ def ensure_default_admin():
     if admin:
         patch = {}
         if not admin.get("password_hash"):
-            patch["password_hash"] = generate_password_hash("admin123456")
+            temp_password = secrets.token_urlsafe(16)
+            patch["password_hash"] = generate_password_hash(temp_password)
+            logger.warning("admin 用户缺少密码，已生成随机密码（请通过运维手段重置）: %s", temp_password)
         if admin.get("role") != "admin":
             patch["role"] = "admin"
         if admin.get("status") != "active":
@@ -203,9 +219,10 @@ def ensure_default_admin():
             db[USER_COLLECTION].update_one({"username": "admin"}, {"$set": patch})
         return
 
+    default_password = secrets.token_urlsafe(16)
     db[USER_COLLECTION].insert_one({
         "username": "admin",
-        "password_hash": generate_password_hash("admin123456"),
+        "password_hash": generate_password_hash(default_password),
         "role": "admin",
         "status": "active",
         "display_name": "System Admin",
@@ -214,6 +231,7 @@ def ensure_default_admin():
         "updated_at": _now(),
         "last_login_at": None,
     })
+    logger.warning("首次创建 admin 用户，临时密码: %s（请尽快登录修改）", default_password)
 
 
 def _token_hash(token):
@@ -323,22 +341,9 @@ def _remove_user_from_ad_accounts(db, username):
 def verify_user_credentials(username, password):
     username = str(username or "").strip()
     password = str(password or "")
-    if username == "admin" and password == "admin123456":
-        ensure_default_admin()
     user = get_user_by_username(username)
     if not user or user.get("status") != "active":
         return None
-    if username == "admin" and password == "admin123456" and not check_password_hash(user.get("password_hash", ""), password):
-        get_db()[USER_COLLECTION].update_one(
-            {"username": "admin"},
-            {"$set": {
-                "password_hash": generate_password_hash("admin123456"),
-                "role": "admin",
-                "status": "active",
-                "updated_at": _now(),
-            }}
-        )
-        user = get_user_by_username("admin")
     if not check_password_hash(user.get("password_hash", ""), password):
         return None
     get_db()[USER_COLLECTION].update_one(
@@ -602,15 +607,15 @@ def upsert_bm(user_id, data):
         "bm_id": data.get("id"),
         "name": data.get("name"),
         "bmtype": data.get("bmtype", ""),
-        "is_restricted": 1 if _to_bool(data.get("isRestricted")) else 0,
+        "is_restricted": _to_bool(data.get("isRestricted")),
         "verification_status": data.get("verification_status", ""),
         "created_time": data.get("created_time", ""),
         "sharing_eligibility_status": data.get("sharing_eligibility_status", ""),
-        "can_create_ad_account": 1 if _to_bool(data.get("can_create_ad_account", True)) else 0,
+        "can_create_ad_account": _to_bool(data.get("can_create_ad_account", True)),
         "extended_credit_id": data.get("extended_credit_id", ""),
         "partner_relationships": json.dumps(data.get("partner_relationships", {}), default=str),
         "business_users": json.dumps(data.get("business_users", {}), default=str),
-        "is_disabled_for_integrity": 1 if _to_bool(data.get("is_disabled_for_integrity")) else 0,
+        "is_disabled_for_integrity": _to_bool(data.get("is_disabled_for_integrity")),
         "created_by": data.get("created_by", ""),
         "permitted_roles": data.get("permitted_roles", ""),
         "raw_data": json.dumps(data, ensure_ascii=False, default=str),

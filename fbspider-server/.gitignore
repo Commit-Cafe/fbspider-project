@@ -23,4 +23,20 @@ dist-ssr
 *.sln
 *.sw?
 
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+venv/
+.env
+*.pyc
+
+# Callback logs (generated at runtime)
+callback_logs/
+
 ./guangdada/

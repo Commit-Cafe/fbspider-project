@@ -3,7 +3,7 @@ from flask import Blueprint, jsonify, request
 from auth import api_key_required
 from ws_relay import (
     list_devices, pick_device, send_command, get_task_result,
-    find_device_by_username, find_device_by_account,
+    find_device_by_username, find_device_by_account, resolve_device,
 )
 
 bp = Blueprint("api_pixel", __name__, url_prefix="/api/open/pixel")
@@ -11,44 +11,8 @@ bp = Blueprint("api_pixel", __name__, url_prefix="/api/open/pixel")
 SCOPE = "device-control"
 
 
-def _check_device_logged_in(did):
-    """检查设备是否已登录，返回 (username, error_msg)"""
-    dev_info = list_devices().get(did, {})
-    username = dev_info.get("username")
-    if not username:
-        return None, "所有在线设备均未登录 Facebook，请先在浏览器中登录 Facebook 并刷新插件页面"
-    return username, None
-
-
 def _resolve_device(body):
-    if body.get("device"):
-        did = pick_device(body["device"])
-        if not did:
-            return None, None, f"没有匹配 {body['device']} 的在线设备"
-        username, err = _check_device_logged_in(did)
-        if err:
-            return None, None, err
-        return did, username, None
-
-    if body.get("account_id"):
-        did, username, err = find_device_by_account(body["account_id"])
-        if err:
-            return None, username, err
-        return did, username, None
-
-    if body.get("username"):
-        did = find_device_by_username(body["username"])
-        if not did:
-            return None, body["username"], f"用户 {body['username']} 没有在线设备"
-        return did, body["username"], None
-
-    did = pick_device()
-    if not did:
-        return None, None, "没有在线设备"
-    username, err = _check_device_logged_in(did)
-    if err:
-        return None, None, err
-    return did, username, None
+    return resolve_device(body, require_login=True)
 
 
 def _send(device_id, action, params):

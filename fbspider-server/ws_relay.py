@@ -10,11 +10,14 @@ WebSocket 中继服务器
 """
 import asyncio
 import json
+import time
 import uuid
 import threading
 from datetime import datetime
 
 import websockets.exceptions
+
+from logger import logger
 
 # ============ 共享状态 ============
 # 已连接的设备: device_id -> { ws, tabs, connected_at, username }
@@ -49,7 +52,7 @@ async def _ws_handler(websocket):
                     old_user = existing.get("username")
                     existing["username"] = username
                     if old_user != username:
-                        print(f"[WS] 设备 {device_id} 用户变更: {old_user} -> {username}")
+                        logger.info("设备 %s 用户变更: %s -> %s", device_id, old_user, username)
                 else:
                     devices[device_id] = {
                         "ws": websocket,
@@ -57,7 +60,7 @@ async def _ws_handler(websocket):
                         "connected_at": datetime.utcnow().isoformat(),
                         "username": username,
                     }
-                    print(f"[WS] 设备注册: {device_id} (user={username})")
+                    logger.info("设备注册: %s (user=%s)", device_id, username)
                 await websocket.send(json.dumps({
                     "action": "ping",
                     "task_id": str(uuid.uuid4())[:8],
@@ -77,7 +80,7 @@ async def _ws_handler(websocket):
             elif msg.get("type") == "task_result":
                 task_id = msg.get("task_id")
                 result = msg.get("result", {})
-                print(f"[WS] 任务结果 [{task_id}]: {json.dumps(result, ensure_ascii=False)}")
+                logger.info("任务结果 [%s]: %s", task_id, json.dumps(result, ensure_ascii=False)[:200])
                 task_results[task_id] = {
                     "result": result,
                     "created_at": datetime.utcnow().isoformat(),
@@ -89,11 +92,11 @@ async def _ws_handler(websocket):
     except websockets.exceptions.ConnectionClosed:
         pass  # normal disconnect, no need to log
     except Exception as e:
-        print(f"[WS] 连接异常: {e}")
+        logger.error("连接异常: %s", e)
     finally:
         if device_id and device_id in devices:
             del devices[device_id]
-            print(f"[WS] 设备断开: {device_id}")
+            logger.info("设备断开: %s", device_id)
 
 
 # ============ 指令发送 ============
@@ -156,7 +159,7 @@ async def _async_send_command(device_id, action, params):
     task_id = str(uuid.uuid4())[:8]
     msg = {"action": action, "task_id": task_id, "params": params}
     await dev["ws"].send(json.dumps(msg))
-    print(f"[WS] --> 已发送 [{task_id}]: {action} {json.dumps(params, ensure_ascii=False)}")
+    logger.info("--> 已发送 [%s]: %s %s", task_id, action, json.dumps(params, ensure_ascii=False)[:200])
     return task_id, None
 
 
@@ -193,7 +196,7 @@ def _cleanup_old_results():
     for tid in expired:
         del task_results[tid]
     if expired:
-        print(f"[WS] 清理过期任务结果: {len(expired)} 条")
+        logger.info("清理过期任务结果: %d 条", len(expired))
 
 
 def list_devices():
@@ -207,6 +210,55 @@ def list_devices():
             "username": dev.get("username"),
         }
     return result
+
+
+def resolve_device(body, require_login=False):
+    """
+    统一的设备解析函数，供所有路由共用。
+    
+    优先级:
+    1. body.device — 直接指定设备 ID 前缀
+    2. body.account_id — 通过 account→user→device 自动路由
+    3. body.username — 通过用户名查找
+    4. 回退到第一个在线设备
+    
+    Args:
+        body: 请求体字典
+        require_login: 是否要求设备已登录（有 username）
+    
+    Returns:
+        (device_id, username, error_msg)
+    """
+    if body.get("device"):
+        did = pick_device(body["device"])
+        if not did:
+            return None, None, f"没有匹配 {body['device']} 的在线设备"
+        dev_info = list_devices().get(did, {})
+        username = dev_info.get("username")
+        if require_login and not username:
+            return None, None, "所有在线设备均未登录 Facebook，请先在浏览器中登录 Facebook 并刷新插件页面"
+        return did, username, None
+
+    if body.get("account_id"):
+        did, username, err = find_device_by_account(body["account_id"])
+        if err:
+            return None, username, err
+        return did, username, None
+
+    if body.get("username"):
+        did = find_device_by_username(body["username"])
+        if not did:
+            return None, body["username"], f"用户 {body['username']} 没有在线设备"
+        return did, body["username"], None
+
+    did = pick_device()
+    if not did:
+        return None, None, "没有在线设备"
+    dev_info = list_devices().get(did, {})
+    username = dev_info.get("username")
+    if require_login and not username:
+        return None, None, "所有在线设备均未登录 Facebook，请先在浏览器中登录 Facebook 并刷新插件页面"
+    return did, username, None
 
 
 # ============ 启动 ============
@@ -223,7 +275,7 @@ async def _run_ws_server():
         close_timeout=5,
         max_size=2**20,
     ):
-        print(f"[WS] WebSocket server listening on ws://0.0.0.0:{WS_PORT}")
+        logger.info("WebSocket server listening on ws://0.0.0.0:%d", WS_PORT)
         await asyncio.Future()  # run forever
 
 
@@ -235,7 +287,7 @@ def _ws_thread_target():
             asyncio.set_event_loop(_ws_loop)
             _ws_loop.run_until_complete(_run_ws_server())
         except Exception as exc:
-            print(f"[WS] server crashed: {exc}")
+            logger.error("server crashed: %s", exc)
         finally:
             try:
                 if _ws_loop and not _ws_loop.is_closed():
@@ -243,8 +295,8 @@ def _ws_thread_target():
             except Exception:
                 pass
             _ws_loop = None
-        print("[WS] retrying server startup in 3 seconds")
-        threading.Event().wait(3)
+        logger.warning("retrying server startup in 3 seconds")
+        time.sleep(3)
 
 
 def start_ws_server():

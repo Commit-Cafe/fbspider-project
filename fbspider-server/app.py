@@ -6,8 +6,11 @@ from datetime import datetime, date
 from flask import Flask, jsonify, request, send_from_directory
 from flask.json.provider import DefaultJSONProvider
 from flask_cors import CORS
-from config import SECRET_KEY
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from config import SECRET_KEY, CORS_ORIGINS
 from models import init_db
+from logger import logger
 from scheduler import start_scheduler
 
 
@@ -31,10 +34,17 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 CORS(
     app,
-    resources={r"/api/*": {"origins": r".*"}},
+    resources={r"/api/*": {"origins": CORS_ORIGINS.split(",")}},
     allow_headers=["Content-Type", "Authorization", "X-Auth-Token", "X-API-Key"],
     supports_credentials=True,
     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+)
+
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["120 per minute"],
+    storage_uri="memory://",
 )
 
 # Always init DB on startup (including gunicorn)
@@ -63,6 +73,14 @@ app.register_blueprint(api_open_bp)
 app.register_blueprint(ads_bp)
 app.register_blueprint(upload_bp)
 app.register_blueprint(pixel_bp)
+
+
+with app.app_context():
+    for rule in app.url_map.iter_rules():
+        if rule.endpoint == "auth_api.api_login":
+            view_func = app.view_functions[rule.endpoint]
+            app.view_functions[rule.endpoint] = limiter.limit("5 per minute")(view_func)
+            break
 
 # 启动 WebSocket 中继服务（独立线程，端口 7671）
 from ws_relay import start_ws_server
@@ -144,6 +162,6 @@ def fallback(e):
 
 if __name__ == '__main__':
     init_db()
-    print("fbhelper Local Server starting...")
-    print("Dashboard: http://47.129.247.139:7150/dashboard")
+    logger.info("fbhelper Local Server starting...")
+    logger.info("Dashboard: http://localhost:7150/dashboard")
     app.run(host='0.0.0.0', port=7150, debug=False, use_reloader=False)
