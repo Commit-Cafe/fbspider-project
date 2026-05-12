@@ -40,3 +40,14 @@ venv/
 callback_logs/
 
 ./guangdada/
+
+# pip cache
+pip/
+
+# SQLite DB
+*.db
+*.db-shm
+*.db-wal
+
+# .codex
+.codex

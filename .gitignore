@@ -30,3 +30,6 @@ callback_logs/
 cookies.txt
 pip/
 __pycache__/
+
+# Docs (not uploaded to repos)
+docs/

@@ -1,11 +1,12 @@
 /**
  * pixel-share.js
- * Service Worker 模块 - 像素 BM 间分享 + WebSocket 中继连接
+ * Service Worker 模块 - 像素 BM 间分享 + WebSocket 中继连接 + BM 邀请人员
  *
  * 职责:
  * 1. 与后端 WS 中继建立连接 (ws:// 不受 HTTPS 页面限制)
  * 2. 接收 authorize_pixel 指令后调用 Facebook GraphQL API
  * 3. 从 content-pixel.js 获取页面上的 username
+ * 4. 接收 invite_to_bm 指令后调用 Facebook Graph API 邀请人员进 BM
  */
 'use strict';
 
@@ -90,6 +91,8 @@ function connectWs() {
       handleAuthorizePixel(msg.params || {}, msg.task_id);
     } else if (msg.action === 'share_pixel_to_ad_account') {
       handleSharePixelToAdAccount(msg.params || {}, msg.task_id);
+    } else if (msg.action === 'invite_to_bm') {
+      handleInviteToBm(msg.params || {}, msg.task_id);
     } else if (msg.action === 'ping') {
       // ignore
     }
@@ -1132,6 +1135,207 @@ function shareViaGraphql(params, taskId) {
       sendTaskResult(taskId, result);
       return result;
     });
+}
+
+// ============ BM 邀请人员 ============
+
+var GRAPH_API_URL = 'https://adsmanager-graph.facebook.com/v17.0';
+
+var ROLES_FULL_CONTROL = [
+  'DEFAULT', 'MANAGE', 'DEVELOPER', 'EMPLOYEE',
+  'ASSET_MANAGE', 'ASSET_VIEW',
+  'PEOPLE_MANAGE', 'PEOPLE_VIEW',
+  'PARTNERS_VIEW', 'PARTNERS_MANAGE',
+  'PROFILE_MANAGE'
+];
+
+var ROLES_EMPLOYEE = [
+  'EMPLOYEE', 'ASSET_VIEW', 'PEOPLE_VIEW', 'PARTNERS_VIEW'
+];
+
+function getAccessToken() {
+  return new Promise(function (resolve, reject) {
+    chrome.storage.local.get(['_getEAABToken'], function (items) {
+      var tokenData = items && items._getEAABToken;
+      var token = null;
+      if (tokenData) {
+        if (typeof tokenData === 'string') {
+          token = tokenData;
+        } else if (tokenData.value) {
+          token = tokenData.value;
+        }
+      }
+      if (token) {
+        console.log('[PixelShare] access_token 获取成功');
+        resolve(token);
+      } else {
+        reject(new Error('无法获取 access_token，请确认插件已登录'));
+      }
+    });
+  });
+}
+
+function resolveRoles(roleName) {
+  if (!roleName || roleName === 'full_control' || roleName === '完全控制') {
+    return ROLES_FULL_CONTROL;
+  }
+  if (roleName === 'employee' || roleName === '职员') {
+    return ROLES_EMPLOYEE;
+  }
+  return ROLES_FULL_CONTROL;
+}
+
+function handleInviteToBm(params, taskId) {
+  var email = params.email;
+  var businessId = params.business_id;
+  var roleName = params.role || 'full_control';
+
+  console.log('[PixelShare] 邀请人员进 BM: email=' + email + ', bm=' + businessId + ', role=' + roleName);
+
+  if (!email) {
+    var r = { status: 'error', message: '缺少 email 参数' };
+    sendTaskResult(taskId, r);
+    return Promise.resolve(r);
+  }
+  if (!businessId) {
+    var r = { status: 'error', message: '缺少 business_id 参数' };
+    sendTaskResult(taskId, r);
+    return Promise.resolve(r);
+  }
+
+  return getAccessToken().then(function (accessToken) {
+    var roles = resolveRoles(roleName);
+    var rolesJson = JSON.stringify(roles);
+
+    var bodyParams = 'brandId=' + encodeURIComponent(businessId) +
+      '&email=' + encodeURIComponent(email) +
+      '&roles=' + encodeURIComponent(rolesJson);
+
+    var batchItem = {
+      method: 'POST',
+      relative_url: '/v3.0/' + businessId + '/business_users',
+      body: bodyParams
+    };
+
+    var formData = new FormData();
+    formData.append('method', 'post');
+    formData.append('batch', JSON.stringify([batchItem]));
+    formData.append('pretty', '0');
+    formData.append('suppress_http_code', '1');
+
+    var url = GRAPH_API_URL +
+      '?suppress_http_code=1&locale=en_US' +
+      '&access_token=' + encodeURIComponent(accessToken) +
+      '&format=json&pretty=0&transport=cors';
+
+    console.log('[PixelShare] 发送邀请请求: email=' + email + ', bm=' + businessId + ', roles=' + rolesJson);
+
+    return fetch(url, {
+      method: 'POST',
+      body: formData
+    }).then(function (resp) {
+      return resp.json();
+    }).then(function (data) {
+      console.log('[PixelShare] 邀请响应:', JSON.stringify(data).substring(0, 800));
+
+      if (Array.isArray(data) && data.length > 0) {
+        var item = data[0];
+        var bodyStr = item.body;
+        if (typeof bodyStr === 'string') {
+          try {
+            var bodyJson = JSON.parse(bodyStr);
+            if (bodyJson.error) {
+              var errMsg = bodyJson.error.message || JSON.stringify(bodyJson.error);
+              var result = {
+                status: 'error',
+                email: email,
+                business_id: businessId,
+                role: roleName,
+                invited: false,
+                message: '邀请失败: ' + errMsg
+              };
+              sendTaskResult(taskId, result);
+              return result;
+            }
+            var result = {
+              status: 'ok',
+              email: email,
+              business_id: businessId,
+              role: roleName,
+              invited: true,
+              invite_id: bodyJson.id || null,
+              message: '邀请已发送: ' + email + ' 已被邀请加入 BM ' + businessId
+            };
+            sendTaskResult(taskId, result);
+            return result;
+          } catch (e) {
+            console.error('[PixelShare] 响应 body 解析失败:', bodyStr);
+          }
+        }
+
+        if (item.code === 200 || item.code === 201) {
+          var result = {
+            status: 'ok',
+            email: email,
+            business_id: businessId,
+            role: roleName,
+            invited: true,
+            message: '邀请已发送: ' + email + ' 已被邀请加入 BM ' + businessId
+          };
+          sendTaskResult(taskId, result);
+          return result;
+        }
+
+        if (item.code && item.code >= 400) {
+          var result = {
+            status: 'error',
+            email: email,
+            business_id: businessId,
+            role: roleName,
+            invited: false,
+            message: '邀请失败: HTTP ' + item.code
+          };
+          sendTaskResult(taskId, result);
+          return result;
+        }
+      }
+
+      if (data.error) {
+        var result = {
+          status: 'error',
+          email: email,
+          business_id: businessId,
+          role: roleName,
+          invited: false,
+          message: '邀请失败: ' + (data.error.message || JSON.stringify(data.error))
+        };
+        sendTaskResult(taskId, result);
+        return result;
+      }
+
+      var result = {
+        status: 'ok',
+        email: email,
+        business_id: businessId,
+        role: roleName,
+        invited: true,
+        message: '邀请请求已发送: ' + email
+      };
+      sendTaskResult(taskId, result);
+      return result;
+    });
+  }).catch(function (err) {
+    var result = {
+      status: 'error',
+      email: email,
+      business_id: businessId,
+      role: roleName,
+      invited: false,
+      message: err.message || '邀请失败'
+    };
+    sendTaskResult(taskId, result);
+    return result;
+  });
 }
 
 // ============ 启动 ============

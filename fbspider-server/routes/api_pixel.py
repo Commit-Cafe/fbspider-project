@@ -168,6 +168,160 @@ def batch_authorize():
     })
 
 
+# ============ BM 邀请人员 ============
+
+
+@bp.route("/invite_to_bm", methods=["POST"])
+@api_key_required(scope=SCOPE)
+def invite_to_bm():
+    """邀请人员进 BM
+    Body: {
+        "email": "xxx@outlook.com",
+        "business_id": "1632044938058987",
+        "role": "full_control",         // 可选: "full_control"(默认) / "employee"
+        "username?": "...",
+        "device?": "..."
+    }
+    """
+    body = request.get_json(silent=True) or {}
+
+    email = body.get("email")
+    business_id = body.get("business_id")
+
+    if not email:
+        return jsonify({"success": False, "message": "缺少 email"}), 400
+    if not business_id:
+        return jsonify({"success": False, "message": "缺少 business_id"}), 400
+
+    did, username, err = _resolve_device(body)
+    if err:
+        return jsonify({"success": False, "message": err, "matched_user": username}), 404
+
+    params = {
+        "email": str(email),
+        "business_id": str(business_id),
+    }
+    if body.get("role"):
+        params["role"] = str(body["role"])
+
+    return _send(did, "invite_to_bm", params)
+
+
+@bp.route("/batch_invite_to_bm", methods=["POST"])
+@api_key_required(scope=SCOPE)
+def batch_invite_to_bm():
+    """批量邀请人员进 BM
+    Body: {
+        "tasks": [
+            {"email": "a@outlook.com", "business_id": "1632044938058987", "role": "full_control"},
+            {"email": "b@outlook.com", "business_id": "1632044938058987", "role": "employee"},
+            ...
+        ],
+        "username?": "...",
+        "device?": "...",
+        "interval?": 2
+    }
+    """
+    import time
+    body = request.get_json(silent=True) or {}
+
+    tasks = body.get("tasks")
+    if not tasks or not isinstance(tasks, list):
+        return jsonify({"success": False, "message": "缺少 tasks 列表"}), 400
+
+    interval = max(1, min(body.get("interval", 2), 10))
+
+    did, username, err = _resolve_device(body)
+    if err:
+        return jsonify({"success": False, "message": err, "matched_user": username}), 404
+
+    results = []
+    for i, task in enumerate(tasks):
+        email = str(task.get("email", "")).strip()
+        business_id = str(task.get("business_id", "")).strip()
+
+        if not email or not business_id:
+            results.append({
+                "index": i,
+                "email": email,
+                "business_id": business_id,
+                "success": False,
+                "message": "缺少 email 或 business_id",
+            })
+            continue
+
+        cmd_params = {
+            "email": email,
+            "business_id": business_id,
+        }
+        if task.get("role"):
+            cmd_params["role"] = str(task["role"])
+
+        try:
+            task_id, cmd_err = send_command(did, "invite_to_bm", cmd_params)
+        except Exception as e:
+            results.append({
+                "index": i,
+                "email": email,
+                "business_id": business_id,
+                "success": False,
+                "message": str(e),
+            })
+            continue
+
+        if cmd_err:
+            results.append({
+                "index": i,
+                "email": email,
+                "business_id": business_id,
+                "success": False,
+                "message": cmd_err,
+            })
+            continue
+
+        max_wait = 30
+        waited = 0
+        task_result = None
+        while waited < max_wait:
+            time.sleep(2)
+            waited += 2
+            task_result = get_task_result(task_id)
+            if task_result is not None:
+                break
+
+        if task_result is None:
+            results.append({
+                "index": i,
+                "email": email,
+                "business_id": business_id,
+                "task_id": task_id,
+                "success": False,
+                "message": f"任务超时 ({max_wait}s)",
+            })
+        else:
+            results.append({
+                "index": i,
+                "email": email,
+                "business_id": business_id,
+                "task_id": task_id,
+                "success": task_result.get("status") == "ok",
+                "invited": task_result.get("invited", False),
+                "message": task_result.get("message", ""),
+            })
+
+        if i < len(tasks) - 1:
+            time.sleep(interval)
+
+    success_count = sum(1 for r in results if r.get("success"))
+    return jsonify({
+        "success": True,
+        "total": len(tasks),
+        "success_count": success_count,
+        "fail_count": len(tasks) - success_count,
+        "results": results,
+    })
+
+
 @bp.route("/result/<task_id>", methods=["GET"])
 @api_key_required(scope=SCOPE)
 def result(task_id):
