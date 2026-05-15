@@ -2,8 +2,10 @@ import os
 import io
 import gzip
 import json
+import time
+import uuid
 from datetime import datetime, date
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, g, send_from_directory
 from flask.json.provider import DefaultJSONProvider
 from flask_cors import CORS
 from flask_limiter import Limiter
@@ -82,9 +84,76 @@ with app.app_context():
             app.view_functions[rule.endpoint] = limiter.limit("5 per minute")(view_func)
             break
 
-# 启动 WebSocket 中继服务（独立线程，端口 7671）
 from ws_relay import start_ws_server
 start_ws_server()
+
+
+# --- Trace ID + Request Logging ---
+
+@app.before_request
+def inject_trace_id():
+    g.trace_id = request.headers.get("X-Trace-ID", str(uuid.uuid4()))
+    g.start_time = time.time()
+
+
+@app.after_request
+def log_and_trace_response(response):
+    duration_ms = (time.time() - g.start_time) * 1000 if hasattr(g, "start_time") else 0
+    trace_id = getattr(g, "trace_id", "")
+    user_id = getattr(g, "current_user", {}).get("username", "") if hasattr(g, "current_user") and isinstance(getattr(g, "current_user", None), dict) else ""
+    response.headers["X-Trace-ID"] = trace_id
+
+    if request.path.startswith("/api/") and not request.path.startswith("/api/health"):
+        logger.info(
+            "%s %s → %s (%.0fms)",
+            request.method, request.path,
+            response.status_code, duration_ms,
+            extra={
+                "trace_id": trace_id,
+                "user_id": user_id,
+                "extra_data": {
+                    "method": request.method,
+                    "path": request.path,
+                    "status": response.status_code,
+                    "duration_ms": round(duration_ms, 1),
+                },
+            },
+        )
+    return response
+
+
+# --- Health Check ---
+
+@app.route("/api/health")
+def health():
+    checks = {}
+    overall = "ok"
+
+    try:
+        from models import get_db, reset_db_client
+        db = get_db()
+        db.command("ping")
+        checks["mongo"] = "connected"
+    except Exception as e:
+        checks["mongo"] = f"error: {e}"
+        overall = "degraded"
+        try:
+            reset_db_client()
+            logger.warning("MongoDB 连接异常，已重置客户端，下次请求将自动重连")
+        except Exception:
+            pass
+
+    from ws_relay import list_devices
+    online = list_devices()
+    checks["online_devices"] = len(online)
+    checks["ws_port"] = 7671
+    checks["device_details"] = {
+        did: {"username": d.get("username"), "last_heartbeat": d.get("last_heartbeat")}
+        for did, d in online.items()
+    }
+
+    code = 200 if overall == "ok" else 503
+    return jsonify({"status": overall, "checks": checks}), code
 
 
 # --- Serve React SPA via static routes + 404 fallback ---

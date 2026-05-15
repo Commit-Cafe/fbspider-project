@@ -28,6 +28,7 @@ task_results = {}
 _ws_loop = None
 _ws_thread = None
 _ws_started = False
+_ws_crash_count = 0
 
 WS_PORT = 7671
 
@@ -80,7 +81,21 @@ async def _ws_handler(websocket):
             elif msg.get("type") == "task_result":
                 task_id = msg.get("task_id")
                 result = msg.get("result", {})
-                logger.info("任务结果 [%s]: %s", task_id, json.dumps(result, ensure_ascii=False)[:200])
+                trace_id_from_msg = msg.get("trace_id", "")
+                status = result.get("status", "unknown")
+                logger.info(
+                    "<-- [%s] %s %s",
+                    task_id, status, json.dumps(result, ensure_ascii=False)[:200],
+                    extra={
+                        "trace_id": trace_id_from_msg,
+                        "extra_data": {
+                            "task_id": task_id,
+                            "device_id": device_id,
+                            "status": status,
+                            "result_preview": json.dumps(result, ensure_ascii=False)[:200],
+                        },
+                    },
+                )
                 task_results[task_id] = {
                     "result": result,
                     "created_at": datetime.utcnow().isoformat(),
@@ -105,14 +120,20 @@ def pick_device(device_id_prefix=None):
     """按前缀匹配设备；无前缀时优先选已登录（username 非空）的设备"""
     if not devices:
         return None
+    multi_hint = ""
+    if len(devices) > 1:
+        device_list = ", ".join(
+            f"{did}({dev.get('username') or '未登录'})" for did, dev in devices.items()
+        )
+        multi_hint = f"当前有 {len(devices)} 个在线设备: {device_list}，有可能是开了多个浏览器插件导致选错设备，建议检查并关闭多余的插件"
+        logger.warning("多设备在线: %s", multi_hint)
     if not device_id_prefix:
-        # 优先选已登录设备
         for did, dev in devices.items():
             if dev.get("username"):
+                if multi_hint:
+                    logger.info("自动选择设备: %s (username=%s)", did, dev.get("username"))
                 return did
-        # 全部未登录，返回第一个
         return list(devices.keys())[0]
-    # 前缀匹配：同样优先已登录
     fallback = None
     for did in devices:
         if did.startswith(device_id_prefix):
@@ -152,26 +173,46 @@ def find_device_by_account(account_id):
     return device_id, username, None
 
 
-async def _async_send_command(device_id, action, params):
+async def _async_send_command(device_id, action, params, trace_id=None):
     dev = devices.get(device_id)
     if not dev:
         return None, f"设备 {device_id} 不在线"
     task_id = str(uuid.uuid4())[:8]
     msg = {"action": action, "task_id": task_id, "params": params}
+    if trace_id:
+        msg["trace_id"] = trace_id
     await dev["ws"].send(json.dumps(msg))
-    logger.info("--> 已发送 [%s]: %s %s", task_id, action, json.dumps(params, ensure_ascii=False)[:200])
+    logger.info(
+        "--> [%s] %s %s",
+        task_id, action, json.dumps(params, ensure_ascii=False)[:200],
+        extra={
+            "trace_id": trace_id or "",
+            "extra_data": {
+                "task_id": task_id,
+                "action": action,
+                "device_id": device_id,
+                "params_preview": json.dumps(params, ensure_ascii=False)[:200],
+            },
+        },
+    )
     return task_id, None
 
 
-def send_command(device_id, action, params):
+def send_command(device_id, action, params, trace_id=None):
     """
     线程安全的指令发送（从 Flask 线程调用）。
     返回 (task_id, error_msg)。
     """
     if _ws_loop is None:
         return None, "WebSocket 服务未启动"
+    if not trace_id:
+        try:
+            from flask import g
+            trace_id = getattr(g, "trace_id", None)
+        except Exception:
+            pass
     future = asyncio.run_coroutine_threadsafe(
-        _async_send_command(device_id, action, params), _ws_loop
+        _async_send_command(device_id, action, params, trace_id), _ws_loop
     )
     return future.result(timeout=5)
 
@@ -258,6 +299,14 @@ def resolve_device(body, require_login=False):
     username = dev_info.get("username")
     if require_login and not username:
         return None, None, "所有在线设备均未登录 Facebook，请先在浏览器中登录 Facebook 并刷新插件页面"
+    if len(devices) > 1:
+        device_list = ", ".join(
+            f"{d}({info.get('username') or '未登录'})" for d, info in devices.items()
+        )
+        logger.warning(
+            "resolve_device 自动选择了 %s(%s)，但当前有 %d 个在线设备: %s，有可能是开了多个浏览器插件，建议检查",
+            did, username or "未登录", len(devices), device_list,
+        )
     return did, username, None
 
 
@@ -280,14 +329,15 @@ async def _run_ws_server():
 
 
 def _ws_thread_target():
-    global _ws_loop
+    global _ws_loop, _ws_crash_count
     while True:
         try:
             _ws_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(_ws_loop)
             _ws_loop.run_until_complete(_run_ws_server())
         except Exception as exc:
-            logger.error("server crashed: %s", exc)
+            _ws_crash_count += 1
+            logger.error("WS server crashed (第 %d 次): %s", _ws_crash_count, exc)
         finally:
             try:
                 if _ws_loop and not _ws_loop.is_closed():
@@ -295,8 +345,10 @@ def _ws_thread_target():
             except Exception:
                 pass
             _ws_loop = None
-        logger.warning("retrying server startup in 3 seconds")
-        time.sleep(3)
+
+        delay = min(3 * (2 ** min(_ws_crash_count - 1, 4)), 60)
+        logger.warning("WS server 将在 %d 秒后重启 (累计崩溃 %d 次)", delay, _ws_crash_count)
+        time.sleep(delay)
 
 
 def start_ws_server():

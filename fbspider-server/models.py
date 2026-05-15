@@ -30,8 +30,20 @@ def get_db():
             maxPoolSize=20,
             minPoolSize=2,
             retryWrites=True,
+            socketTimeoutMS=30000,
+            heartbeatFrequencyMS=10000,
         )
     return _client[MONGO_DB]
+
+
+def reset_db_client():
+    global _client
+    if _client is not None:
+        try:
+            _client.close()
+        except Exception:
+            pass
+        _client = None
 
 
 def init_db():

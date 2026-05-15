@@ -6,6 +6,26 @@ from typing import Dict, Any, Optional, List
 
 class FbspiderPixelAuthorize:
 
+    ERROR_HINTS = {
+        "没有在线设备": "请确认浏览器插件已安装并打开了 fbspider.com 页面",
+        "没有匹配": "请确认指定设备 ID 正确，且浏览器插件页面已打开",
+        "没有在线": "请确认浏览器插件页面已打开，插件已加载",
+        "未登录 Facebook": "请先在浏览器中登录 business.facebook.com",
+        "未登录": "请先在浏览器中登录 Facebook",
+        "无法获取 fb_dtsg": "请先在浏览器中登录 business.facebook.com",
+        "无法获取 Facebook 用户": "Facebook 登录状态失效，请刷新 business.facebook.com 页面",
+        "缺少 businessID": "请在参数中指定 business_id（BM ID），或在浏览器中打开 BM 页面",
+        "相同": "源 BM 和目标 BM 相同，无法分享给自己",
+        "自己的业务编号": "源 BM 和目标 BM 相同，无法分享给自己",
+        "权限不足": "当前 Facebook 账号可能没有该像素的分享权限",
+        "无法分享": "该 BM 的像素可能受限，无法对外分享",
+        "Unauthorized": "API Key 无效或已过期，请检查 X-API-Key",
+        "Forbidden": "API Key 缺少必要权限 (device-control scope)",
+        "ConnectionError": "后端服务未启动，请确认 fbspider-server 正在运行",
+        "ConnectionRefusedError": "后端服务未启动，请确认 fbspider-server 正在运行",
+        "未找到": "有可能是开了多个浏览器插件导致选错设备，建议只保留一个插件并关闭多余的",
+    }
+
     def __init__(self, api_key: str, base_url: str = "http://47.129.247.139:7150"):
         self.api_key = api_key
         self.base_url = base_url.rstrip('/')
@@ -13,6 +33,28 @@ class FbspiderPixelAuthorize:
             "Content-Type": "application/json",
             "X-API-Key": self.api_key
         }
+
+    def _enrich_error(self, message: str) -> str:
+        for key, hint in self.ERROR_HINTS.items():
+            if key in message:
+                return f"{message}（{hint}）"
+        return message
+
+    def _check_server_alive(self) -> Optional[str]:
+        try:
+            resp = requests.get(f"{self.base_url}/api/health", timeout=5)
+            data = resp.json()
+            if data.get("status") != "ok":
+                mongo = data.get("checks", {}).get("mongo", "unknown")
+                return f"服务状态异常: mongo={mongo}"
+            online = data.get("checks", {}).get("online_devices", 0)
+            if online == 0:
+                return "服务正常但无在线设备，请确认浏览器插件已打开 fbspider.com 页面"
+            return None
+        except requests.exceptions.ConnectionError:
+            return "无法连接后端服务，请确认 fbspider-server 正在运行（http://localhost:7150）"
+        except Exception as e:
+            return f"健康检查失败: {e}"
 
     def authorize(
         self,
@@ -28,12 +70,16 @@ class FbspiderPixelAuthorize:
         )
 
         if not task_id:
+            error_msg = "发起授权任务失败"
+            hint = self._check_server_alive()
+            if hint:
+                error_msg = f"{error_msg}。诊断: {hint}"
             return {
                 "success": False,
                 "pixel_id": pixel_id,
                 "target_account_id": target_account_id,
                 "authorized": False,
-                "message": "发起授权任务失败"
+                "message": error_msg
             }
 
         result = self._poll_result(task_id, timeout)
@@ -284,9 +330,14 @@ class FbspiderPixelAuthorize:
                 print(f"[Skill] 授权任务已下发: task_id={task_id}, device={data.get('device')}")
                 return task_id
             else:
-                print(f"[Skill] 发起授权失败: {data.get('message')}")
+                msg = self._enrich_error(data.get('message', '未知错误'))
+                print(f"[Skill] 发起授权失败: {msg}")
                 return None
 
+        except requests.exceptions.ConnectionError:
+            hint = self._check_server_alive()
+            print(f"[Skill] 连接失败: {hint or '未知网络错误'}")
+            return None
         except Exception as e:
             print(f"[Skill] 请求异常: {e}")
             return None

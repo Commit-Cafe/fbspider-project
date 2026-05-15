@@ -841,29 +841,24 @@ function handleSharePixelToAdAccount(params, taskId) {
       var shareParams = Object.assign({}, params);
 
       if (params.pixel_asset_id) {
-        // 方案 A：用户直接提供了真实 asset ID
         console.log('[PixelShare] 使用提供的 pixel_asset_id=' + params.pixel_asset_id);
         shareParams.pixel_id = params.pixel_asset_id;
         return doShareToAdAccount(tokens, shareParams, taskId);
-      } else {
-        // 方案 B：搜索真实 asset ID
+      } else if (params.pixel_name) {
         return searchPixelAssetId(tokens, params)
           .then(function (searchResult) {
-            if (!searchResult) {
-              throw new Error('未找到像素的真实 ID，请提供 pixel_name 或 pixel_asset_id');
+            if (searchResult) {
+              shareParams.pixel_id = searchResult.asset_id;
+              console.log('[PixelShare] 使用搜索到的真实 asset ID: ' + searchResult.asset_id +
+                ' (' + searchResult.name + ')');
+            } else {
+              console.log('[PixelShare] 未搜索到真实 asset ID，使用原始 pixel_id=' + params.pixel_id + ' 直接分享');
             }
-
-            if (searchResult.all_assets.length > 1) {
-              console.log('[PixelShare] 搜索到多个像素，使用第一个匹配: ' +
-                searchResult.asset_id + ' (' + searchResult.name + ')');
-            }
-
-            shareParams.pixel_id = searchResult.asset_id;
-            console.log('[PixelShare] 使用搜索到的真实 asset ID: ' + searchResult.asset_id +
-              ' (' + searchResult.name + ')');
-
             return doShareToAdAccount(tokens, shareParams, taskId);
           });
+      } else {
+        console.log('[PixelShare] 无 pixel_name，直接使用原始 pixel_id=' + params.pixel_id + ' 分享');
+        return doShareToAdAccount(tokens, shareParams, taskId);
       }
     })
     .catch(function (err) {
