@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request
 
 from auth import api_key_required
+from models import get_db
 from ws_relay import (
     list_devices, pick_device, send_command, get_task_result,
     find_device_by_username, find_device_by_account, resolve_device,
@@ -31,10 +32,11 @@ def authorize():
     body = request.get_json(silent=True) or {}
 
     pixel_id = body.get("pixel_id")
+    pixel_name = body.get("pixel_name")
     target_account_id = body.get("target_account_id")
 
-    if not pixel_id:
-        return jsonify({"success": False, "message": "缺少 pixel_id"}), 400
+    if not pixel_id and not pixel_name:
+        return jsonify({"success": False, "message": "缺少 pixel_id 或 pixel_name"}), 400
     if not target_account_id:
         return jsonify({"success": False, "message": "缺少 target_account_id"}), 400
 
@@ -43,11 +45,13 @@ def authorize():
         return jsonify({"success": False, "message": err, "matched_user": username}), 404
 
     params = {
-        "pixel_id": str(pixel_id),
+        "pixel_id": str(pixel_id) if pixel_id else "",
         "target_account_id": str(target_account_id),
     }
     if body.get("business_id"):
         params["business_id"] = str(body["business_id"])
+    if pixel_name:
+        params["pixel_name"] = str(pixel_name)
 
     return _send(did, "authorize_pixel", params)
 
@@ -59,11 +63,12 @@ def batch_authorize():
     Body: {
         "tasks": [
             {"pixel_id": "xxx", "target_account_id": "yyy", "business_id": "zzz"},
+            {"pixel_name": "NYC01", "target_account_id": "yyy"},
             ...
         ],
         "username?": "...",
         "device?": "...",
-        "interval?": 2       // 每条任务间隔秒数，默认 2
+        "interval?": 2
     }
     """
     import time
@@ -82,15 +87,17 @@ def batch_authorize():
     results = []
     for i, task in enumerate(tasks):
         pixel_id = str(task.get("pixel_id", ""))
+        pixel_name = str(task.get("pixel_name", ""))
         target_account_id = str(task.get("target_account_id", ""))
 
-        if not pixel_id or not target_account_id:
+        if (not pixel_id and not pixel_name) or not target_account_id:
             results.append({
                 "index": i,
                 "pixel_id": pixel_id,
+                "pixel_name": pixel_name,
                 "target_account_id": target_account_id,
                 "success": False,
-                "message": "缺少 pixel_id 或 target_account_id",
+                "message": "缺少 pixel_id/pixel_name 或 target_account_id",
             })
             continue
 
@@ -100,6 +107,8 @@ def batch_authorize():
         }
         if task.get("business_id"):
             cmd_params["business_id"] = str(task["business_id"])
+        if pixel_name:
+            cmd_params["pixel_name"] = pixel_name
 
         try:
             task_id, cmd_err = send_command(did, "authorize_pixel", cmd_params)
@@ -329,6 +338,47 @@ def result(task_id):
     if r is None:
         return jsonify({"success": True, "status": "pending"})
     return jsonify({"success": True, "status": "done", "result": r})
+
+
+@bp.route("/search", methods=["GET"])
+@api_key_required(scope=SCOPE)
+def search_pixel():
+    """从本地数据库搜索像素信息。
+
+    Query params:
+        name — 像素名称（模糊匹配）
+        pixel_id — 像素 ID（精确匹配）
+        username — 限定用户（可选）
+    """
+    name = request.args.get("name", "").strip()
+    pixel_id = request.args.get("pixel_id", "").strip()
+    username = request.args.get("username", "").strip()
+
+    if not name and not pixel_id:
+        return jsonify({"success": False, "message": "请提供 name 或 pixel_id 参数"}), 400
+
+    db = get_db()
+    query = {}
+    if username:
+        query["user_id"] = username
+    if pixel_id:
+        query["pixel_id"] = pixel_id
+    if name:
+        query["name"] = {"$regex": name, "$options": "i"}
+
+    pixels = list(db.pixels.find(query, {"_id": 0, "raw_data": 0}).limit(20))
+
+    results = []
+    for p in pixels:
+        results.append({
+            "pixel_id": p.get("pixel_id", ""),
+            "name": p.get("name", ""),
+            "owner_bm_id": p.get("owner_bm_id", ""),
+            "status": p.get("status", ""),
+            "user_id": p.get("user_id", ""),
+        })
+
+    return jsonify({"success": True, "count": len(results), "data": results})
 
 
 @bp.route("/devices", methods=["GET"])

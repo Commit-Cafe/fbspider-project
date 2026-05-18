@@ -64,6 +64,7 @@ from routes.api_open import bp as api_open_bp
 from routes.api_ads import bp as ads_bp
 from routes.api_upload import bp as upload_bp
 from routes.api_pixel import bp as pixel_bp
+from routes.api_nlp import bp as nlp_bp
 
 app.register_blueprint(receive_bp)
 app.register_blueprint(serve_bp)
@@ -75,6 +76,7 @@ app.register_blueprint(api_open_bp)
 app.register_blueprint(ads_bp)
 app.register_blueprint(upload_bp)
 app.register_blueprint(pixel_bp)
+app.register_blueprint(nlp_bp)
 
 
 with app.app_context():
