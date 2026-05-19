@@ -30,7 +30,7 @@ MINIO_BUCKET = os.environ.get('MINIO_BUCKET', 'ad-creatives')
 MINIO_SECURE = os.environ.get('MINIO_SECURE', '0') == '1'
 MINIO_PUBLIC_URL = os.environ.get('MINIO_PUBLIC_URL', '')
 
-CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:5173,http://localhost:7151,http://54.179.56.204:7151')
+CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:5173,http://localhost:7151,http://47.131.62.227:7151')
 
 CURRENCY_OFFSETS = {
     'BIF': 1, 'CLP': 1, 'COP': 1, 'CRC': 1, 'CVE': 1, 'DJF': 1,

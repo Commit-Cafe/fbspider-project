@@ -26,7 +26,7 @@ class FbspiderPixelAuthorize:
         "未找到": "有可能是开了多个浏览器插件导致选错设备，建议只保留一个插件并关闭多余的",
     }
 
-    def __init__(self, api_key: str, base_url: str = "http://54.179.56.204:7151"):
+    def __init__(self, api_key: str, base_url: str = "http://47.131.62.227:7151"):
         self.api_key = api_key
         self.base_url = base_url.rstrip('/')
         self.headers = {
@@ -52,7 +52,7 @@ class FbspiderPixelAuthorize:
                 return "服务正常但无在线设备，请确认浏览器插件已打开 fbspider.com 页面"
             return None
         except requests.exceptions.ConnectionError:
-            return "无法连接后端服务，请确认 fbhelper-server 正在运行（http://54.179.56.204:7151）"
+            return "无法连接后端服务，请确认 fbhelper-server 正在运行（http://47.131.62.227:7151）"
         except Exception as e:
             return f"健康检查失败: {e}"
 
@@ -741,7 +741,7 @@ class FbspiderPixelAuthorize:
 
 def main():
     api_key = os.getenv("FBSPIDER_API_KEY", "fbk_xxxxx")
-    base_url = os.getenv("FBSPIDER_BASE_URL", "http://54.179.56.204:7151")
+    base_url = os.getenv("FBSPIDER_BASE_URL", "http://47.131.62.227:7151")
     skill = FbspiderPixelAuthorize(api_key, base_url)
 
     # === 示例 1: 单次授权 ===
