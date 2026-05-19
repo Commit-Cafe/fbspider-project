@@ -33,7 +33,6 @@ dist/
 build/
 .eggs/
 venv/
-.env
 *.pyc
 
 # Callback logs (generated at runtime)
