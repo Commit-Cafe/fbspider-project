@@ -48,85 +48,47 @@ fi
 # 检查配置文件
 if [ ! -f ".env" ]; then
     echo "[3/4] 首次运行，正在生成配置文件..."
-
-    # 生成随机密钥
-    SECRET_KEY=$(openssl rand -hex 32)
-
-    cat > .env << EOF
-# FBSpider 单用户版配置
-# 自动生成于 $(date)
-
-# 数据库配置（使用 SQLite）
-MONGO_URI=sqlite:///fbspider.db
-MONGO_DB=fbspider
-
-# 安全密钥（自动生成）
-SECRET_KEY=$SECRET_KEY
-
-# 服务器配置
-CORS_ORIGINS=http://localhost:7150,http://127.0.0.1:7150
-
-# 可选配置（OpenClaw 回调）
-ACCOUNT_DSL_CALLBACK_URL=
-ACCOUNT_DSL_CALLBACK_SECRET=
-ACCOUNT_DSL_CALLBACK_ENABLED=0
-EOF
-
-    echo "[✓] 配置文件已生成：.env"
+    cp .env.example .env
+    echo "[✓] 已从 .env.example 生成 .env 配置文件"
+    echo "    请编辑 .env 填入正确的 MONGO_URI 和 SECRET_KEY"
     echo ""
+
+    if command -v nano &> /dev/null; then
+        nano .env
+    elif command -v vim &> /dev/null; then
+        vim .env
+    else
+        open -e .env
+    fi
+
+    echo ""
+    echo "配置完成后，请再次运行此脚本"
+    exit 0
 fi
 
 # 创建日志目录
 mkdir -p logs
 
-# 启动 WebSocket 服务
 echo "[4/4] 启动服务..."
 echo ""
 
-python3 ws_relay.py > logs/ws_relay.log 2>&1 &
-WS_PID=$!
-
-# 等待 WebSocket 服务启动
-sleep 2
-
-# 检查 WebSocket 服务是否启动成功
-if ! kill -0 $WS_PID 2>/dev/null; then
-    echo "[错误] WebSocket 服务启动失败，请查看 logs/ws_relay.log"
-    exit 1
-fi
-
-# 启动 HTTP 服务
 echo "========================================"
 echo "  服务已启动！"
 echo "========================================"
 echo ""
-echo "  访问地址: http://localhost:7150"
-echo "  WebSocket: ws://localhost:7671"
+echo "  访问地址: http://54.179.56.204:7151"
+echo "  WebSocket: ws://54.179.56.204:7672"
 echo ""
-echo "  默认账号: admin"
-echo "  默认密码: 首次启动会在日志中显示"
+echo "  默认账号: admin / admin123456"
 echo ""
 echo "  日志目录: logs/"
-echo "  数据库文件: fbspider.db"
 echo ""
 echo "========================================"
 echo "  按 Ctrl+C 停止服务"
 echo "========================================"
 echo ""
 
-# 捕获退出信号
-cleanup() {
-    echo ""
-    echo "正在停止服务..."
-    kill $WS_PID 2>/dev/null || true
-    echo "服务已停止"
-    exit 0
-}
-
-trap cleanup INT TERM
-
-# 启动主服务（前台运行）
 python3 app.py
 
-# 清理
-cleanup
+echo ""
+echo "服务已停止"

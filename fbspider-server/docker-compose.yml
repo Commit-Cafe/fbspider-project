@@ -1,13 +1,16 @@
 services:
   fbhelper:
+    image: 172.31.45.252:3001/tangzean/fbhelper-server:latest
     build: .
     container_name: fbhelper-server
     ports:
-      - "7150:7150"
-      - "7671:7671"
+      - "7151:7151"
+      - "7672:7672"
     volumes:
       - ./callback_logs:/app/callback_logs
     environment:
       - MONGO_URI=mongodb://R3sW8kLm:J6tH2zLx9VwM5qDb@172.31.40.125:27017/plat?authSource=plat
+      - SECRET_KEY=fbhelper-prod-2025-change-me
+      - CORS_ORIGINS=http://54.179.56.204:7151
       - ACCOUNT_DSL_CALLBACK_INTERVAL_MINUTES=10
     restart: unless-stopped

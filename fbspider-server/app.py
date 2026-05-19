@@ -148,7 +148,7 @@ def health():
     from ws_relay import list_devices
     online = list_devices()
     checks["online_devices"] = len(online)
-    checks["ws_port"] = 7671
+    checks["ws_port"] = 7672
     checks["device_details"] = {
         did: {"username": d.get("username"), "last_heartbeat": d.get("last_heartbeat")}
         for did, d in online.items()
@@ -234,5 +234,5 @@ def fallback(e):
 if __name__ == '__main__':
     init_db()
     logger.info("fbhelper Local Server starting...")
-    logger.info("Dashboard: http://localhost:7150/dashboard")
-    app.run(host='0.0.0.0', port=7150, debug=False, use_reloader=False)
+    logger.info("Dashboard: http://localhost:7151/dashboard")
+    app.run(host='0.0.0.0', port=7151, debug=False, use_reloader=False)

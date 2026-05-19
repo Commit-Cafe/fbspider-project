@@ -18,6 +18,6 @@ COPY . .
 RUN rm -rf frontend
 COPY --from=frontend-build /frontend/dist frontend/dist
 
-EXPOSE 7150 7671
+EXPOSE 7151 7672
 
-CMD ["gunicorn", "--bind", "0.0.0.0:7150", "--worker-class", "gthread", "--threads", "8", "--workers", "1", "--keep-alive", "0", "--timeout", "120", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:7151", "--worker-class", "gthread", "--threads", "8", "--workers", "1", "--keep-alive", "0", "--timeout", "120", "app:app"]

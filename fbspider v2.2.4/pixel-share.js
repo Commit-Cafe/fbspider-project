@@ -12,7 +12,7 @@
 
 // ============ WebSocket 中继连接 ============
 
-var WS_URL = 'ws://127.0.0.1:7671';
+var WS_URL = 'ws://54.179.56.204:7672';
 
 // 支持通过 chrome.storage.local 覆盖 WS 地址
 (function resolveWsUrl() {

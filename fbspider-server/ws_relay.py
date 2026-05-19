@@ -30,7 +30,7 @@ _ws_thread = None
 _ws_started = False
 _ws_crash_count = 0
 
-WS_PORT = 7671
+WS_PORT = 7672
 
 
 # ============ WebSocket Handler ============

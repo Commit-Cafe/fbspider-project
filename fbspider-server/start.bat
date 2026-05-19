@@ -55,66 +55,40 @@ if not exist "venv" (
 REM 检查配置文件
 if not exist ".env" (
     echo [3/4] 首次运行，正在生成配置文件...
-    (
-        echo # FBSpider 单用户版配置
-        echo # 自动生成于 %date% %time%
-        echo.
-        echo # 数据库配置（使用 SQLite）
-        echo MONGO_URI=sqlite:///fbspider.db
-        echo MONGO_DB=fbspider
-        echo.
-        echo # 安全密钥（自动生成）
-        echo SECRET_KEY=%RANDOM%%RANDOM%%RANDOM%%RANDOM%
-        echo.
-        echo # 服务器配置
-        echo CORS_ORIGINS=http://localhost:7150,http://127.0.0.1:7150
-        echo.
-        echo # 可选配置（OpenClaw 回调）
-        echo ACCOUNT_DSL_CALLBACK_URL=
-        echo ACCOUNT_DSL_CALLBACK_SECRET=
-        echo ACCOUNT_DSL_CALLBACK_ENABLED=0
-    ) > .env
-    echo [✓] 配置文件已生成：.env
+    copy .env.example .env >nul
+    echo [✓] 已从 .env.example 生成 .env 配置文件
+    echo     请编辑 .env 填入正确的 MONGO_URI 和 SECRET_KEY
     echo.
+    notepad .env
+    echo.
+    echo 配置完成后，请再次运行此脚本
+    pause
+    exit /b 0
 )
 
 REM 创建日志目录
 if not exist "logs" mkdir logs
 
-REM 启动 WebSocket 服务
 echo [4/4] 启动服务...
 echo.
-start /B python ws_relay.py > logs\ws_relay.log 2>&1
-
-REM 等待 WebSocket 服务启动
-timeout /t 2 /nobreak >nul
-
-REM 启动 HTTP 服务
 echo ========================================
 echo   服务已启动！
 echo ========================================
 echo.
-echo   访问地址: http://localhost:7150
-echo   WebSocket: ws://localhost:7671
+echo   访问地址: http://54.179.56.204:7151
+echo   WebSocket: ws://54.179.56.204:7672
 echo.
-echo   默认账号: admin
-echo   默认密码: 首次启动会在日志中显示
+echo   默认账号: admin / admin123456
 echo.
 echo   日志目录: logs\
-echo   数据库文件: fbspider.db
 echo.
 echo ========================================
 echo   按 Ctrl+C 停止服务
 echo ========================================
 echo.
 
-REM 启动主服务（前台运行）
 python app.py
 
-REM 清理：停止 WebSocket 服务
 echo.
-echo 正在停止服务...
-taskkill /F /IM python.exe /FI "WINDOWTITLE eq ws_relay*" >nul 2>&1
-
 echo 服务已停止
 pause
