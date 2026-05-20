@@ -1,5 +1,5 @@
 services:
-  fbhelper:
+  fbhelper-server-prod:
     image: 172.31.45.252:3001/tangzean/fbhelper-server:latest
     build: .
     container_name: fbhelper-server-prod
